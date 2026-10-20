@@ -1,0 +1,7 @@
+# Allow docs directory
+!docs/
+!docs/**
+
+# Logs & temp
+*.log
+.DS_Store
