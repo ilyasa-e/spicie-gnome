@@ -1,0 +1,16 @@
+{
+  "name": "Spotify Floating Lyrics",
+  "description": "Standalone desktop floating lyrics, taskbar lyrics, and popup controller for Spotify via MPRIS D-Bus.",
+  "uuid": "spotify-floating-lyrics@norang.dev",
+  "settings-schema": "org.gnome.shell.extensions.spotify-floating-lyrics",
+  "shell-version": [
+    "46",
+    "47",
+    "48",
+    "49",
+    "50"
+  ],
+  "url": "https://github.com/norang/spotify-floating-lyrics-gnome",
+  "gettext-domain": "spotify-floating-lyrics",
+  "version": 1
+}

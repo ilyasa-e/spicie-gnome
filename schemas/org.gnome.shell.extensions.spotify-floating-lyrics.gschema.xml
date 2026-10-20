@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="spotify-floating-lyrics">
+  <schema id="org.gnome.shell.extensions.spotify-floating-lyrics"
+          path="/org/gnome/shell/extensions/spotify-floating-lyrics/">
+
+    <key name="show-in-panel" type="b">
+      <default>true</default>
+      <summary>Show lyrics in GNOME Top Bar</summary>
+      <description>Display the active line of Spotify lyrics directly inside the GNOME Shell Top Bar panel.</description>
+    </key>
+
+    <key name="show-floating" type="b">
+      <default>true</default>
+      <summary>Show floating desktop overlay</summary>
+      <description>Render a persistent floating lyrics overlay directly on the desktop.</description>
+    </key>
+
+    <key name="floating-always-on-top" type="b">
+      <default>true</default>
+      <summary>Pin floating HUD on top</summary>
+      <description>Keep the floating desktop lyrics overlay above all standard application windows.</description>
+    </key>
+
+    <key name="floating-click-passthrough" type="b">
+      <default>false</default>
+      <summary>Enable mouse click passthrough</summary>
+      <description>Disable pointer events on the floating overlay so mouse clicks pass through to windows beneath.</description>
+    </key>
+
+    <key name="floating-position" type="s">
+      <choices>
+        <choice value="top-left"/>
+        <choice value="top-right"/>
+        <choice value="bottom-left"/>
+        <choice value="bottom-right"/>
+        <choice value="center"/>
+        <choice value="custom"/>
+      </choices>
+      <default>'top-right'</default>
+      <summary>Floating HUD position preset</summary>
+      <description>Screen corner preset or custom coordinate mode for the floating overlay.</description>
+    </key>
+
+    <key name="floating-x" type="i">
+      <range min="-10000" max="10000"/>
+      <default>100</default>
+      <summary>Floating HUD X coordinate</summary>
+      <description>Horizontal pixel coordinate of the floating HUD when position is set to custom.</description>
+    </key>
+
+    <key name="floating-y" type="i">
+      <range min="-10000" max="10000"/>
+      <default>100</default>
+      <summary>Floating HUD Y coordinate</summary>
+      <description>Vertical pixel coordinate of the floating HUD when position is set to custom.</description>
+    </key>
+
+    <key name="font-family" type="s">
+      <default>'Sans'</default>
+      <summary>Lyrics font family</summary>
+      <description>Font family for rendering synced lyrics in the floating HUD.</description>
+    </key>
+
+    <key name="font-size" type="i">
+      <range min="10" max="96"/>
+      <default>22</default>
+      <summary>Lyrics font size</summary>
+      <description>Font size in pixels for the active line in the floating overlay.</description>
+    </key>
+
+    <key name="line-spacing" type="i">
+      <range min="0" max="100"/>
+      <default>14</default>
+      <summary>Lyrics line spacing</summary>
+      <description>Vertical spacing in pixels between lyric lines in the floating overlay.</description>
+    </key>
+
+    <key name="background-style" type="s">
+      <choices>
+        <choice value="transparent"/>
+        <choice value="blur"/>
+        <choice value="dark-card"/>
+      </choices>
+      <default>'transparent'</default>
+      <summary>HUD background appearance style</summary>
+      <description>Background visual style for the floating HUD: transparent, blurred glass, or dark pill card.</description>
+    </key>
+
+    <key name="enable-spicy-lyrics" type="b">
+      <default>false</default>
+      <summary>Enable Spicy Lyrics provider</summary>
+      <description>Fetch enhanced syllable-synced lyrics from Spicy Lyrics API when available.</description>
+    </key>
+
+    <key name="spicy-lyrics-token" type="s">
+      <default>''</default>
+      <summary>Spicy Lyrics API token</summary>
+      <description>User-provided Spotify Web access token for querying Spicy Lyrics API.</description>
+    </key>
+
+    <key name="enable-romanization" type="b">
+      <default>true</default>
+      <summary>Enable lyrics romanization</summary>
+      <description>Automatically transliterate Korean (Hangul), Japanese (Kana), and Cyrillic lyrics to Latin characters.</description>
+    </key>
+
+  </schema>
+</schemalist>
