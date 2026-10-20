@@ -1,0 +1,499 @@
+#!/usr/bin/env -S gjs -m
+/**
+ * Spotify Floating Lyrics - Standalone Smooth HUD
+ * High-performance 60 FPS millisecond karaoke overlay using GTK4, Cairo, and Pango.
+ * Packaged and managed directly by the GNOME Shell Extension.
+ */
+
+import Gtk from 'gi://Gtk?version=4.0';
+import Gdk from 'gi://Gdk?version=4.0';
+import Pango from 'gi://Pango?version=1.0';
+import PangoCairo from 'gi://PangoCairo?version=1.0';
+import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
+import GioUnix from 'gi://GioUnix';
+import Cairo from 'cairo';
+
+class FloatingLyricsHUDApp {
+    constructor() {
+        this._app = new Gtk.Application({
+            application_id: 'dev.norang.SpotifyFloatingLyricsHUD',
+            flags: Gio.ApplicationFlags.FLAGS_NONE,
+        });
+
+        this._win = null;
+        this._drawingArea = null;
+        this._settings = null;
+
+        // Lyrics & playback state
+        this._lines = [];
+        this._currentLineIndex = -1;
+        this._playbackStatus = 'Stopped';
+        this._basePositionMs = 0;
+        this._baseTimeUs = GLib.get_monotonic_time();
+        this._trackTitle = '';
+        this._trackArtist = '';
+
+        // Cached layouts for performance
+        this._activeLayout = null;
+        this._romajiLayout = null;
+        this._nextLayout = null;
+
+        this._setupSettings();
+        this._app.connect('activate', () => this._onActivate());
+    }
+
+    _setupSettings() {
+        try {
+            const schemaSource = Gio.SettingsSchemaSource.get_default();
+            let schema = schemaSource.lookup('org.gnome.shell.extensions.spotify-floating-lyrics', true);
+
+            if (!schema) {
+                // Try extension directory
+                const extPath = GLib.build_filenamev([
+                    GLib.get_home_dir(),
+                    '.local/share/gnome-shell/extensions/spotify-floating-lyrics@norang.dev/schemas'
+                ]);
+                const dirFile = Gio.File.new_for_path(extPath);
+                if (dirFile.query_exists(null)) {
+                    const customSource = Gio.SettingsSchemaSource.new_from_directory(
+                        dirFile.get_path(),
+                        Gio.SettingsSchemaSource.get_default(),
+                        false
+                    );
+                    schema = customSource.lookup('org.gnome.shell.extensions.spotify-floating-lyrics', true);
+                }
+            }
+
+            if (schema) {
+                this._settings = new Gio.Settings({ settings_schema: schema });
+                const keys = [
+                    'font-family',
+                    'font-size',
+                    'line-spacing',
+                    'background-style',
+                    'enable-romanization',
+                    'floating-click-passthrough'
+                ];
+                keys.forEach(k => {
+                    this._settings.connect(`changed::${k}`, () => {
+                        this._onSettingsChanged();
+                    });
+                });
+            }
+        } catch (e) {
+            console.error('[HUD] Settings init error:', e.message);
+        }
+    }
+
+    _onActivate() {
+        if (this._win) {
+            this._win.present();
+            return;
+        }
+
+        this._win = new Gtk.ApplicationWindow({
+            application: this._app,
+            title: 'Spotify Floating Lyrics',
+            default_width: 580,
+            default_height: 150,
+            decorated: false,
+        });
+
+        // Set transparent window background via CSS
+        const cssProvider = new Gtk.CssProvider();
+        cssProvider.load_from_data(`
+            window, .background {
+                background-color: transparent;
+                background: transparent;
+            }
+        `, -1);
+        Gtk.StyleContext.add_provider_for_display(
+            this._win.get_display(),
+            cssProvider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        );
+
+        // Drawing Area for 60 FPS sub-pixel karaoke rendering
+        this._drawingArea = new Gtk.DrawingArea();
+        this._drawingArea.set_draw_func((area, cr, width, height) => {
+            this._render(cr, width, height);
+        });
+
+        // Frame clock tick callback for smooth animation
+        this._drawingArea.add_tick_callback(() => {
+            if (this._drawingArea) {
+                this._drawingArea.queue_draw();
+            }
+            return true;
+        });
+
+        // Drag to move window
+        const clickGesture = new Gtk.GestureClick();
+        clickGesture.connect('pressed', (gesture, nPress, x, y) => {
+            const passthrough = this._settings ? this._settings.get_boolean('floating-click-passthrough') : false;
+            if (passthrough) return;
+
+            if (gesture.get_current_button() === 1) { // Left click
+                const surface = this._win.get_surface();
+                if (surface && typeof surface.begin_move === 'function') {
+                    const device = gesture.get_device();
+                    surface.begin_move(device, 1, x, y, Gtk.get_current_event_time());
+                }
+            }
+        });
+        this._drawingArea.add_controller(clickGesture);
+
+        this._win.set_child(this._drawingArea);
+        this._win.present();
+
+        // Apply initial click passthrough
+        this._applyClickPassthrough();
+
+        // Start listening to stdin IPC
+        this._startStdinReader();
+
+        // Also attempt direct MPRIS fallback if running standalone
+        this._initMPRISFallback();
+    }
+
+    _onSettingsChanged() {
+        this._applyClickPassthrough();
+        if (this._drawingArea) {
+            this._drawingArea.queue_draw();
+        }
+    }
+
+    _applyClickPassthrough() {
+        if (!this._win) return;
+        const surface = this._win.get_surface();
+        if (!surface || typeof surface.set_input_region !== 'function') return;
+
+        const passthrough = this._settings ? this._settings.get_boolean('floating-click-passthrough') : false;
+        if (passthrough) {
+            const emptyRegion = new Cairo.Region();
+            surface.set_input_region(emptyRegion);
+        } else {
+            surface.set_input_region(null);
+        }
+    }
+
+    _startStdinReader() {
+        try {
+            const stdinStream = new Gio.DataInputStream({
+                base_stream: new GioUnix.InputStream({ fd: 0, close_fd: false })
+            });
+
+            const readNext = () => {
+                stdinStream.read_line_async(GLib.PRIORITY_DEFAULT, null, (stream, res) => {
+                    try {
+                        const [line] = stream.read_line_finish_utf8(res);
+                        if (line === null) {
+                            // Extension exited or closed stdin -> cleanly exit HUD
+                            this._app.quit();
+                            return;
+                        }
+                        this._handleIPCMessage(line);
+                        readNext();
+                    } catch (e) {
+                        this._app.quit();
+                    }
+                });
+            };
+            readNext();
+        } catch (e) {
+            console.error('[HUD] Stdin IPC init error:', e.message);
+        }
+    }
+
+    _handleIPCMessage(rawJson) {
+        try {
+            const msg = JSON.parse(rawJson);
+            if (!msg || !msg.type) return;
+
+            switch (msg.type) {
+                case 'lyrics':
+                    this._lines = Array.isArray(msg.lines) ? msg.lines : [];
+                    this._trackTitle = msg.title || '';
+                    this._trackArtist = msg.artist || '';
+                    this._currentLineIndex = -1;
+                    break;
+
+                case 'sync':
+                    this._playbackStatus = msg.status || 'Stopped';
+                    this._basePositionMs = typeof msg.positionMs === 'number' ? msg.positionMs : 0;
+                    this._baseTimeUs = GLib.get_monotonic_time();
+                    break;
+
+                case 'exit':
+                    this._app.quit();
+                    break;
+            }
+        } catch (e) {
+            // Ignore malformed JSON line
+        }
+    }
+
+    _initMPRISFallback() {
+        // Direct MPRIS listener in case launched outside extension
+        try {
+            const bus = Gio.bus_get_sync(Gio.BusType.SESSION, null);
+            bus.signal_subscribe(
+                'org.mpris.MediaPlayer2.spotify',
+                'org.freedesktop.DBus.Properties',
+                'PropertiesChanged',
+                '/org/mpris/MediaPlayer2',
+                null,
+                Gio.DBusSignalFlags.NONE,
+                (conn, sender, path, iface, signal, params) => {
+                    const [changedIface, changedProps] = params.recursiveUnpack();
+                    if (changedIface !== 'org.mpris.MediaPlayer2.Player') return;
+
+                    if (changedProps.PlaybackStatus) {
+                        this._playbackStatus = changedProps.PlaybackStatus;
+                        this._baseTimeUs = GLib.get_monotonic_time();
+                    }
+                }
+            );
+        } catch (e) {
+            // MPRIS fallback optional
+        }
+    }
+
+    _getCurrentPositionMs() {
+        if (this._playbackStatus !== 'Playing') {
+            return this._basePositionMs;
+        }
+        const nowUs = GLib.get_monotonic_time();
+        const elapsedMs = (nowUs - this._baseTimeUs) / 1000;
+        return this._basePositionMs + elapsedMs;
+    }
+
+    _findActiveIndex(posMs) {
+        if (!this._lines || this._lines.length === 0) return -1;
+        if (posMs < this._lines[0].timeMs) return -1;
+
+        let low = 0;
+        let high = this._lines.length - 1;
+        let candidate = -1;
+
+        while (low <= high) {
+            const mid = Math.floor((low + high) / 2);
+            if (this._lines[mid].timeMs <= posMs) {
+                candidate = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+
+        if (candidate >= 0) {
+            const cur = this._lines[candidate];
+            if (cur.endTimeMs && posMs >= cur.endTimeMs) {
+                if (candidate < this._lines.length - 1 && posMs < this._lines[candidate + 1].timeMs) {
+                    return -1; // Interlude between lines
+                }
+            }
+        }
+        return candidate;
+    }
+
+    _render(cr, width, height) {
+        // 1. Clear background transparently
+        cr.save();
+        cr.setOperator(Cairo.Operator.CLEAR);
+        cr.paint();
+        cr.restore();
+
+        const currentPosMs = this._getCurrentPositionMs();
+        const activeIdx = this._findActiveIndex(currentPosMs);
+        const activeLine = activeIdx >= 0 ? this._lines[activeIdx] : null;
+
+        // Settings lookup with safe defaults
+        const bgStyle = this._settings ? this._settings.get_string('background-style') : 'transparent';
+        const fontFamily = this._settings ? this._settings.get_string('font-family') : 'Sans';
+        const fontSize = this._settings ? this._settings.get_int('font-size') : 22;
+        const lineSpacing = this._settings ? this._settings.get_int('line-spacing') : 14;
+        const enableRomaji = this._settings ? this._settings.get_boolean('enable-romanization') : true;
+
+        // 2. Draw Background Card / Pill
+        this._drawBackdrop(cr, width, height, bgStyle);
+
+        // 3. Render Content
+        const padX = 28;
+        let curY = 22;
+
+        if (!activeLine) {
+            // Idle state: Show Spotify or Track title
+            const idleText = this._trackTitle ? `♪ ${this._trackTitle} — ${this._trackArtist}` : '♪ Spotify Floating Lyrics';
+            this._drawTextLine(cr, idleText, `${fontFamily} Bold ${fontSize}`, padX, curY + 16, [1, 1, 1, 0.6]);
+            return;
+        }
+
+        // Active Line with 60 FPS karaoke sweep
+        const activeWords = (activeLine.words || activeLine.text || '').trim();
+        const activeHeight = this._drawKaraokeLine(
+            cr,
+            activeLine,
+            activeWords,
+            currentPosMs,
+            fontFamily,
+            fontSize,
+            padX,
+            curY
+        );
+        curY += activeHeight + Math.round(lineSpacing * 0.6);
+
+        // Romanization line (if present)
+        if (enableRomaji && activeLine.romanized && activeLine.romanized !== activeWords) {
+            const romajiSize = Math.max(12, Math.round(fontSize * 0.65));
+            const romHeight = this._drawTextLine(
+                cr,
+                activeLine.romanized,
+                `${fontFamily} Italic ${romajiSize}`,
+                padX,
+                curY,
+                [0.12, 0.84, 0.38, 0.95] // Spotify radiant green
+            );
+            curY += romHeight + 6;
+        }
+
+        // Next Line Preview
+        const nextIdx = activeIdx + 1;
+        if (nextIdx < this._lines.length) {
+            const nextLine = this._lines[nextIdx];
+            const nextWords = (nextLine.words || nextLine.text || '').trim();
+            if (nextWords) {
+                const nextSize = Math.max(12, Math.round(fontSize * 0.68));
+                this._drawTextLine(
+                    cr,
+                    nextWords,
+                    `${fontFamily} ${nextSize}`,
+                    padX,
+                    curY,
+                    [1, 1, 1, 0.38]
+                );
+            }
+        }
+    }
+
+    _drawBackdrop(cr, w, h, style) {
+        if (style === 'transparent') {
+            // Very subtle dark vignette for readability on light wallpapers
+            this._roundedRect(cr, 8, 8, w - 16, h - 16, 20);
+            cr.setSourceRGBA(0, 0, 0, 0.28);
+            cr.fill();
+            return;
+        }
+
+        const radius = 22;
+        this._roundedRect(cr, 8, 8, w - 16, h - 16, radius);
+
+        if (style === 'blur') {
+            // Glassmorphic translucent pill
+            cr.setSourceRGBA(0.1, 0.12, 0.16, 0.72);
+            cr.fillPreserve();
+            // Subtle frosted border
+            cr.setSourceRGBA(1.0, 1.0, 1.0, 0.14);
+            cr.setLineWidth(1.2);
+            cr.stroke();
+        } else if (style === 'dark-card') {
+            // Obsidian dark card
+            cr.setSourceRGBA(0.06, 0.07, 0.09, 0.92);
+            cr.fillPreserve();
+            // Neon accent border
+            cr.setSourceRGBA(0.12, 0.84, 0.38, 0.3);
+            cr.setLineWidth(1.2);
+            cr.stroke();
+        }
+    }
+
+    _roundedRect(cr, x, y, w, h, r) {
+        cr.arc(x + r, y + r, r, Math.PI, 1.5 * Math.PI);
+        cr.arc(x + w - r, y + r, r, 1.5 * Math.PI, 2 * Math.PI);
+        cr.arc(x + w - r, y + h - r, r, 0, 0.5 * Math.PI);
+        cr.arc(x + r, y + h - r, r, 0.5 * Math.PI, Math.PI);
+        cr.closePath();
+    }
+
+    _drawKaraokeLine(cr, line, text, posMs, fontName, fontSize, x, y) {
+        const layout = PangoCairo.create_layout(cr);
+        const fontDesc = Pango.FontDescription.from_string(`${fontName} Bold ${fontSize}`);
+        layout.set_font_description(fontDesc);
+        layout.set_text(text, -1);
+        const [textW, textH] = layout.get_pixel_size();
+
+        // 1. Draw base inactive/dim text (rgba 255, 255, 255, 0.35)
+        cr.setSourceRGBA(1.0, 1.0, 1.0, 0.35);
+        cr.moveTo(x, y);
+        PangoCairo.show_layout(cr, layout);
+
+        // 2. Compute millisecond sweep width
+        let fillWidth = 0;
+        if (Array.isArray(line.syllables) && line.syllables.length > 0) {
+            // Syllable-synced karaoke sweep
+            let accumulatedWidth = 0;
+            for (let i = 0; i < line.syllables.length; i++) {
+                const syl = line.syllables[i];
+                const sylLayout = PangoCairo.create_layout(cr);
+                sylLayout.set_font_description(fontDesc);
+                sylLayout.set_text(syl.text || '', -1);
+                const [sw] = sylLayout.get_pixel_size();
+
+                if (posMs >= syl.endTimeMs) {
+                    accumulatedWidth += sw;
+                } else if (posMs >= syl.startTimeMs && posMs < syl.endTimeMs) {
+                    const sylDuration = Math.max(1, syl.endTimeMs - syl.startTimeMs);
+                    const sylProgress = (posMs - syl.startTimeMs) / sylDuration;
+                    accumulatedWidth += sw * sylProgress;
+                    break;
+                } else {
+                    break;
+                }
+            }
+            fillWidth = Math.min(textW, accumulatedWidth);
+        } else {
+            // Standard line-synced smooth karaoke sweep
+            const lineStart = line.timeMs || line.startTimeMs || 0;
+            const lineEnd = line.endTimeMs || (lineStart + 4500);
+            const duration = Math.max(100, lineEnd - lineStart);
+            const progress = Math.max(0, Math.min(1, (posMs - lineStart) / duration));
+            fillWidth = textW * progress;
+        }
+
+        // 3. Clip and draw active glowing highlight
+        if (fillWidth > 0) {
+            cr.save();
+            cr.rectangle(x, y - 2, fillWidth, textH + 4);
+            cr.clip();
+
+            // Radiant white with slight Spotify green glow
+            cr.setSourceRGBA(1.0, 1.0, 1.0, 1.0);
+            cr.moveTo(x, y);
+            PangoCairo.show_layout(cr, layout);
+            cr.restore();
+        }
+
+        return textH;
+    }
+
+    _drawTextLine(cr, text, fontString, x, y, rgba) {
+        const layout = PangoCairo.create_layout(cr);
+        const fontDesc = Pango.FontDescription.from_string(fontString);
+        layout.set_font_description(fontDesc);
+        layout.set_text(text, -1);
+        const [textW, textH] = layout.get_pixel_size();
+
+        cr.setSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+        cr.moveTo(x, y);
+        PangoCairo.show_layout(cr, layout);
+        return textH;
+    }
+
+    run(argv) {
+        return this._app.run(argv || []);
+    }
+}
+
+const hud = new FloatingLyricsHUDApp();
+hud.run([imports.system.programInvocationName]);

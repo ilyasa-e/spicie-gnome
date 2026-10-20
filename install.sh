@@ -33,6 +33,11 @@ cp "${SCRIPT_DIR}/lyricsSync.js" "${TARGET_DIR}/"
 cp "${SCRIPT_DIR}/romanizer.js" "${TARGET_DIR}/"
 cp "${SCRIPT_DIR}/prefs.js" "${TARGET_DIR}/"
 
+# Copy binary helpers (Smooth Standalone HUD)
+mkdir -p "${TARGET_DIR}/bin"
+cp "${SCRIPT_DIR}/bin/spotify-floating-hud" "${TARGET_DIR}/bin/"
+chmod +x "${TARGET_DIR}/bin/spotify-floating-hud"
+
 # Copy schemas
 mkdir -p "${TARGET_DIR}/schemas"
 cp -r "${SCRIPT_DIR}/schemas/"* "${TARGET_DIR}/schemas/"

@@ -104,5 +104,15 @@
       <description>Automatically transliterate Korean (Hangul), Japanese (Kana), and Cyrillic lyrics to Latin characters.</description>
     </key>
 
+    <key name="hud-renderer" type="s">
+      <choices>
+        <choice value="smooth-gtk"/>
+        <choice value="clutter"/>
+      </choices>
+      <default>'smooth-gtk'</default>
+      <summary>Floating HUD renderer mode</summary>
+      <description>Select between smooth 60fps standalone GTK4 renderer or in-shell Clutter actor.</description>
+    </key>
+
   </schema>
 </schemalist>

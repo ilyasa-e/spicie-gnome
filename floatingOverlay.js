@@ -138,6 +138,7 @@ export class DesktopFloatingHUD {
             'line-spacing',
             'background-style',
             'enable-romanization',
+            'hud-renderer',
         ];
 
         keys.forEach(key => {
@@ -150,8 +151,9 @@ export class DesktopFloatingHUD {
         if (!this._container || !this._settings) return;
 
         const showFloating = this._settings.get_boolean('show-floating');
-        this._container.visible = showFloating;
-        if (!showFloating) return;
+        const renderer = this._settings.get_string('hud-renderer');
+        this._container.visible = showFloating && renderer === 'clutter';
+        if (!this._container.visible) return;
 
         // Passthrough click
         const passthrough = this._settings.get_boolean('floating-click-passthrough');

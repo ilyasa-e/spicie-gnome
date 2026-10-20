@@ -39,6 +39,22 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
         settings.bind('show-floating', floatingRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         surfacesGroup.add(floatingRow);
 
+        // ComboRow: Renderer Engine
+        const rendererRow = new Adw.ComboRow({
+            title: 'Floating Renderer Engine',
+            subtitle: 'Choose between 60 FPS smooth sweep GTK4 or native GNOME Clutter',
+        });
+        const rendererModel = new Gtk.StringList();
+        rendererModel.append('Smooth GTK4 (60 FPS Karaoke)');
+        rendererModel.append('In-Shell Clutter Actor');
+        rendererRow.model = rendererModel;
+        const currentRenderer = settings.get_string('hud-renderer');
+        rendererRow.selected = currentRenderer === 'clutter' ? 1 : 0;
+        rendererRow.connect('notify::selected', () => {
+            settings.set_string('hud-renderer', rendererRow.selected === 1 ? 'clutter' : 'smooth-gtk');
+        });
+        surfacesGroup.add(rendererRow);
+
         // ComboRow: Position Preset
         const positionRow = new Adw.ComboRow({
             title: 'Floating Position',
