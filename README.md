@@ -1,86 +1,56 @@
-# Spotify Floating Lyrics - Standalone GNOME Shell Extension
+# Spotify Floating Lyrics for GNOME
 
-Ekstensi **GNOME Shell (GJS)** mandiri (*standalone*) untuk menampilkan lirik Spotify secara real-time langsung di desktop GNOME, tanpa membutuhkan Spicetify, Electron, atau modifikasi pada client Spotify.
+Music controls and live lyrics for the Spotify desktop app, without changing Spotify itself.
 
----
+## Player
 
-## 🌟 Fitur Utama
+Click the music indicator in the top bar to open the player. Choose a layout in **Settings → Player → Layout**:
 
-1. **3 Mode Tampilan Sekaligus**:
-   - **Taskbar / Top Bar Panel**: Menampilkan baris lirik yang sedang dinyanyikan langsung di panel atas GNOME.
-   - **Desktop Floating Overlay HUD**: Lirik melayang transparan di atas semua window desktop (selalu di atas / *always-on-top*).
-   - **System Tray Popup Menu**: Klik ikon di taskbar untuk melihat album art, kontrol pemutar (Play/Pause, Next, Prev), daftar lirik lengkap yang bergulir otomatis mengikuti lagu, dan tombol pintasan setting.
+- **Compact:** the cover and song details sit above the playback controls.
+- **Horizontal:** playback controls sit beside the song details.
 
-2. **100% Standalone (Bebas Spicetify)**:
-   - Berkomunikasi langsung dengan Spotify resmi lewat standar Linux **MPRIS D-Bus** (`org.mpris.MediaPlayer2.spotify`).
-   - Kebal terhadap pembaruan Spotify desktop karena tidak mengubah binary atau file Spotify.
+Both layouts include the album cover, previous/play/pause/next controls, a seek slider, and song times. The background colour follows the cover. Missing or failed covers use a neutral background.
 
-3. **Multi-Source Lyrics & Transliterasi (Romanisasi)**:
-   - **LRCLIB Provider**: Mengambil lirik sinkron milidetik secara gratis tanpa perlu login/token.
-   - **Spicy Lyrics Provider (Apple Music Syllables)**: Opsional dapat diaktifkan di setting dengan memasukkan Spotify Web Token.
-   - **Romanisasi Otomatis**: Transliterasi ke alfabet Latin/Romaji untuk lirik berbahasa Korea (Hangul), Jepang (Kana), dan Cyrillic.
+Use the pin button or **Keep player on desktop** to keep the player visible. Drag its cover or title to move it. The position is saved separately from desktop lyrics. **Player position → Reset** moves it back to the starting position. Fullscreen apps hide the pinned player.
 
-4. **Kustomisasi Lengkap via GNOME Preferences (Libadwaita)**:
-   - **Display & Behavior**:
-     - Toggle Lirik di Top Bar Panel
-     - Toggle Desktop Floating HUD
-     - Posisi Floating (Top-Right, Top-Left, Bottom-Right, Bottom-Left, Center, Custom Drag)
-     - Always on Top
-     - Click Passthrough (klik mouse menembus lirik ke aplikasi di belakangnya)
-   - **Appearance & Typography**:
-     - Backdrop Background: 100% Transparan, Frosted Glass Blur, atau Dark Pill Card
-     - Font Family & Font Size (12px - 48px)
-     - Line Spacing (4px - 36px)
-     - Toggle Romanisasi Romaji
-     - Toggle & Token Spicy Lyrics API
+## Lyrics
 
----
+Lyrics can appear in the top bar, on the desktop, or both. The player does not show a long lyrics list.
 
-## 🚀 Cara Instalasi
+Desktop lyrics offer two animation modes:
 
-Jalankan script installer otomatis:
+- **Smooth:** a separate window with word highlighting when word timing is available.
+- **Classic:** lyrics rendered inside GNOME Shell.
+
+Use **Settings → Lyrics** for text size, font, background, position, and mouse behaviour. Turn on **Let clicks pass through** to interact with the app behind the lyrics.
+
+## Sources
+
+LRCLIB supplies lyrics without sign-in. **Settings → Sources** also offers Spicy Lyrics for word timing, with a Spotify access token. The default source is used when the optional source is unavailable.
+
+## Install
+
+From this repository:
 
 ```bash
-cd /mnt/dev/Dev/personal/spotify-floating-lyrics-gnome
 ./install.sh
 ```
 
-Script akan:
-1. Mengompilasi skema GSettings (`org.gnome.shell.extensions.spotify-floating-lyrics`).
-2. Memasang ekstensi ke `~/.local/share/gnome-shell/extensions/spotify-floating-lyrics@norang.dev`.
-3. Mengaktifkan ekstensi via `gnome-extensions enable`.
+The installer copies the extension and its helper to your local GNOME extension directory, compiles settings, and enables the extension.
 
-### Memuat Ulang GNOME Shell:
-- **Di Wayland**: Log out dan log in kembali ke sesi GNOME.
-- **Di X11**: Tekan `Alt + F2`, ketik `r`, lalu tekan `Enter`.
+When updating an extension already loaded by GNOME, sign out and back in to load changed code. On an X11 session, restarting GNOME Shell also works. The standalone lyrics helper can be tested directly without restarting the desktop; changes to the top-bar player require GNOME Shell to load the updated extension.
 
-### Membuka Menu Pengaturan (Preferences):
+Open settings with:
+
 ```bash
 gnome-extensions prefs spotify-floating-lyrics@norang.dev
 ```
-Atau klik ikon Spotify di taskbar atas -> klik ikon gear pengaturan.
 
----
-
-## 🧪 Menjalankan Pengujian (Testing)
-
-Semua komponen dilengkapi unit test mandiri di GJS:
+## Checks
 
 ```bash
-cd /mnt/dev/Dev/personal/spotify-floating-lyrics-gnome
-
-# 1. Uji Validasi Skema GSettings & Metadata
-bash tests/test_schema.sh
-
-# 2. Uji D-Bus MPRIS & Pelacakan Posisi Waktu
-gjs -m tests/test_mpris.js
-
-# 3. Uji Provider Lirik & Romanizer (Hangul, Kana, Cyrillic)
-gjs -m tests/test_lyrics.js
-
-# 4. Uji Engine Sinkronisasi Baris Lirik
-gjs -m tests/test_sync.js
-
-# 5. Uji Sintaks Seluruh Modul Ekstensi
-bash tests/test_extension.sh
+glib-compile-schemas --strict schemas
+gjs -m checks/player.js
 ```
+
+The player checks cover artwork loading, cancellation when songs change, fallback colours, and time formatting. The player and settings also need a running GNOME session for visual and interaction checks.

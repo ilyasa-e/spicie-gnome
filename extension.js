@@ -99,6 +99,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         // Seeked
         const seekSig = this._mpris.connect('seeked', (_mpris, positionMs) => {
             this._sync.updatePosition(positionMs);
+            this._popup.updatePosition(positionMs);
             this._sendHUDMessage({
                 type: 'sync',
                 status: this._mpris.playbackStatus || 'Paused',
@@ -313,6 +314,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             }
             const pos = this._mpris.getPositionMs();
             this._sync.updatePosition(pos);
+            this._popup.updatePosition(pos);
             this._sendHUDMessage({
                 type: 'sync',
                 status: 'Playing',

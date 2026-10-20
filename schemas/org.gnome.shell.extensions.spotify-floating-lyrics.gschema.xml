@@ -104,6 +104,34 @@
       <description>Automatically transliterate Korean (Hangul), Japanese (Kana), and Cyrillic lyrics to Latin characters.</description>
     </key>
 
+    <key name="player-layout" type="s">
+      <choices>
+        <choice value="compact"/>
+        <choice value="horizontal"/>
+      </choices>
+      <default>'compact'</default>
+      <summary>Player layout</summary>
+      <description>Compact places playback controls below song details; Horizontal places them beside the details.</description>
+    </key>
+
+    <key name="player-pinned" type="b">
+      <default>false</default>
+      <summary>Keep the player visible on the desktop</summary>
+      <description>Show a draggable player independently of the floating lyrics.</description>
+    </key>
+
+    <key name="player-x" type="i">
+      <range min="-10000" max="10000"/>
+      <default>100</default>
+      <summary>Pinned player horizontal position</summary>
+    </key>
+
+    <key name="player-y" type="i">
+      <range min="-10000" max="10000"/>
+      <default>100</default>
+      <summary>Pinned player vertical position</summary>
+    </key>
+
     <key name="hud-renderer" type="s">
       <choices>
         <choice value="smooth-gtk"/>
