@@ -1,5 +1,5 @@
 /**
- * Spotify Floating Lyrics - Lyrics Provider Engine
+ * Spicie - Lyrics Provider Engine
  * Fetches time-synced lyrics from LRCLIB and Spicy Lyrics APIs.
  * Parses LRC format with millisecond precision, handles interludes,
  * and attaches transliterations via Romanizer.

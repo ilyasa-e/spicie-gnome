@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installer for Spicy Lyra GNOME Shell Extension
+# Installer for Spicie GNOME Shell Extension
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,7 +7,7 @@ UUID="spotify-floating-lyrics@norang.dev"
 TARGET_DIR="${HOME}/.local/share/gnome-shell/extensions/${UUID}"
 
 echo "======================================================="
-echo "🎵 Installing Spicy Lyra GNOME Extension..."
+echo "🎵 Installing Spicie GNOME Extension..."
 echo "======================================================="
 
 # 1. Compile GSettings schemas in source directory

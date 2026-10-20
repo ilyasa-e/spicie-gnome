@@ -1,6 +1,6 @@
 #!/usr/bin/env -S gjs -m
 /**
- * Spotify Floating Lyrics - Standalone Smooth HUD
+ * Spicie - Standalone Lyrics Window
  * High-performance 60 FPS millisecond karaoke overlay using GTK4, Cairo, and Pango.
  * Packaged and managed directly by the GNOME Shell Extension.
  */
@@ -99,7 +99,7 @@ export class FloatingLyricsHUDApp {
 
         this._win = new Gtk.ApplicationWindow({
             application: this._app,
-            title: 'Spicy Lyra Lyrics',
+            title: 'Spicie',
             default_width: 580,
             default_height: 150,
             decorated: false,
@@ -358,7 +358,7 @@ export class FloatingLyricsHUDApp {
 
         if (!activeLine) {
             // Idle state: Show Spotify or Track title
-            const idleText = this._trackTitle ? `♪ ${this._trackTitle} — ${this._trackArtist}` : '♪ Spicy Lyra';
+            const idleText = this._trackTitle ? `♪ ${this._trackTitle} — ${this._trackArtist}` : '♪ Spicie';
             const height = this._drawTextLine(cr, idleText, `${fontFamily} Bold ${fontSize}`, padX, curY + 16, [1, 1, 1, 0.6], width - padX * 2);
             this._queueHeight(curY + 16 + height + 22);
             return;

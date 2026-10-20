@@ -7,7 +7,7 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
         window.set_default_size(620, 660);
-        window.title = 'Spicy Lyra';
+        window.title = 'Spicie';
         const signals = [];
         const page = (title, icon) => {
             const result = new Adw.PreferencesPage({ title, name: title.toLowerCase(), icon_name: icon });

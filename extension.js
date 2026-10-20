@@ -273,7 +273,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             const wmClass = typeof metaWindow.get_wm_class === 'function' ? metaWindow.get_wm_class() : '';
             const appId = typeof metaWindow.get_gtk_application_id === 'function' ? metaWindow.get_gtk_application_id() : '';
 
-            if (title === 'Spicy Lyra Lyrics' || title === 'Spotify Floating Lyrics' ||
+            if (title === 'Spicie' || title === 'Spicy Lyra Lyrics' || title === 'Spotify Floating Lyrics' ||
                 wmClass === 'dev.norang.SpotifyFloatingLyricsHUD' ||
                 appId === 'dev.norang.SpotifyFloatingLyricsHUD') {
 

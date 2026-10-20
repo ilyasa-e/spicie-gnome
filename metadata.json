@@ -1,5 +1,5 @@
 {
-  "name": "Spicy Lyra",
+  "name": "Spicie",
   "description": "Music controls, top-bar lyrics, and floating desktop lyrics with optional word timing.",
   "uuid": "spotify-floating-lyrics@norang.dev",
   "settings-schema": "org.gnome.shell.extensions.spotify-floating-lyrics",
@@ -10,7 +10,7 @@
     "49",
     "50"
   ],
-  "url": "https://github.com/ilyasa-e/spicy-lyra-gnome",
+  "url": "https://github.com/ilyasa-e/spicie-gnome",
   "gettext-domain": "spotify-floating-lyrics",
   "version": 2
 }

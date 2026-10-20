@@ -1,4 +1,4 @@
-# Spicy Lyra for GNOME
+# Spicie for GNOME
 
 Music controls and live lyrics for the Spotify desktop app, without changing Spotify itself.
 
