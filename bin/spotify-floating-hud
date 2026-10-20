@@ -14,6 +14,9 @@ import Gio from 'gi://Gio';
 import GioUnix from 'gi://GioUnix';
 import Cairo from 'cairo';
 
+import { SpotifyMPRIS } from '../mpris.js';
+import { LyricsProvider } from '../lyricsProvider.js';
+
 class FloatingLyricsHUDApp {
     constructor() {
         this._app = new Gtk.Application({
@@ -33,6 +36,9 @@ class FloatingLyricsHUDApp {
         this._baseTimeUs = GLib.get_monotonic_time();
         this._trackTitle = '';
         this._trackArtist = '';
+        this._hasStdinLyrics = false;
+        this._mpris = null;
+        this._lyricsProvider = null;
 
         // Cached layouts for performance
         this._activeLayout = null;
@@ -210,6 +216,7 @@ class FloatingLyricsHUDApp {
         try {
             const msg = JSON.parse(rawJson);
             if (!msg || !msg.type) return;
+            this._hasStdinLyrics = true;
 
             switch (msg.type) {
                 case 'lyrics':
@@ -235,28 +242,69 @@ class FloatingLyricsHUDApp {
     }
 
     _initMPRISFallback() {
-        // Direct MPRIS listener in case launched outside extension
         try {
-            const bus = Gio.bus_get_sync(Gio.BusType.SESSION, null);
-            bus.signal_subscribe(
-                'org.mpris.MediaPlayer2.spotify',
-                'org.freedesktop.DBus.Properties',
-                'PropertiesChanged',
-                '/org/mpris/MediaPlayer2',
-                null,
-                Gio.DBusSignalFlags.NONE,
-                (conn, sender, path, iface, signal, params) => {
-                    const [changedIface, changedProps] = params.recursiveUnpack();
-                    if (changedIface !== 'org.mpris.MediaPlayer2.Player') return;
+            this._mpris = new SpotifyMPRIS();
+            this._lyricsProvider = new LyricsProvider();
 
-                    if (changedProps.PlaybackStatus) {
-                        this._playbackStatus = changedProps.PlaybackStatus;
-                        this._baseTimeUs = GLib.get_monotonic_time();
-                    }
+            this._mpris.connect('track-changed', async (_mpris, track) => {
+                if (this._hasStdinLyrics) return;
+                if (!track || !track.title) {
+                    this._lines = [];
+                    this._trackTitle = '';
+                    this._trackArtist = '';
+                    return;
                 }
-            );
+                this._trackTitle = track.title;
+                this._trackArtist = track.artist || '';
+                const durationSec = Math.round((track.durationMs || 0) / 1000);
+                const res = await this._lyricsProvider.fetchLyrics(
+                    track.title,
+                    track.artist || '',
+                    track.album || '',
+                    durationSec,
+                    track.trackId || ''
+                );
+                if (res && res.lines && !this._hasStdinLyrics) {
+                    this._lines = res.lines;
+                }
+            });
+
+            this._mpris.connect('status-changed', (_mpris, status) => {
+                if (this._hasStdinLyrics) return;
+                this._playbackStatus = status;
+                this._basePositionMs = this._mpris.getPositionMs();
+                this._baseTimeUs = GLib.get_monotonic_time();
+            });
+
+            this._mpris.connect('seeked', (_mpris, posMs) => {
+                if (this._hasStdinLyrics) return;
+                this._basePositionMs = posMs;
+                this._baseTimeUs = GLib.get_monotonic_time();
+            });
+
+            // Initial track if already playing
+            const currentTrack = this._mpris.track;
+            if (currentTrack && currentTrack.title) {
+                this._playbackStatus = this._mpris.playbackStatus;
+                this._basePositionMs = this._mpris.getPositionMs();
+                this._baseTimeUs = GLib.get_monotonic_time();
+                this._trackTitle = currentTrack.title;
+                this._trackArtist = currentTrack.artist || '';
+                const durationSec = Math.round((currentTrack.durationMs || 0) / 1000);
+                this._lyricsProvider.fetchLyrics(
+                    currentTrack.title,
+                    currentTrack.artist || '',
+                    currentTrack.album || '',
+                    durationSec,
+                    currentTrack.trackId || ''
+                ).then(res => {
+                    if (res && res.lines && !this._hasStdinLyrics) {
+                        this._lines = res.lines;
+                    }
+                }).catch(() => {});
+            }
         } catch (e) {
-            // MPRIS fallback optional
+            console.error('[HUD] Standalone MPRIS init error:', e.message);
         }
     }
 
