@@ -7,7 +7,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 export const SpotifyIndicator = GObject.registerClass(
 class SpotifyIndicator extends PanelMenu.Button {
     _init(settings, onToggleFloating, onOpenPrefs) {
-        super._init(0.5, 'Spotify Floating Lyrics Indicator', false);
+        super._init(0.5, 'Spicy Lyra Indicator', false);
 
         this._settings = settings;
         this._onToggleFloating = onToggleFloating;

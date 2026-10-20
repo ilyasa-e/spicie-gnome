@@ -94,8 +94,14 @@
 
     <key name="spicy-lyrics-token" type="s">
       <default>''</default>
-      <summary>Spicy Lyrics API token</summary>
-      <description>User-provided Spotify Web access token for querying Spicy Lyrics API.</description>
+      <summary>Spicy Lyrics access key</summary>
+      <description>User-provided Spicy Lyrics key for fetching word timing.</description>
+    </key>
+
+    <key name="animate-lyrics" type="b">
+      <default>true</default>
+      <summary>Animate lyrics when word timing is available</summary>
+      <description>Use character highlighting with timed words or syllables. Line-timed lyrics always use the normal display. Turn off for normal lyrics from every source.</description>
     </key>
 
     <key name="enable-romanization" type="b">

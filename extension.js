@@ -60,6 +60,11 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             });
             this._settingsSignals.push(sid);
         });
+        for (const key of ['enable-spicy-lyrics', 'spicy-lyrics-token', 'enable-romanization']) {
+            this._settingsSignals.push(this._settings.connect(`changed::${key}`, () => {
+                this._onTrackChanged(this._mpris.track);
+            }));
+        }
 
         // 6. Connect Window Manager to configure GTK4 HUD MetaWindow (Always on Top)
         this._initHUDWindowTracking();
@@ -185,8 +190,10 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
                 } catch (e) {
                     // Normal process exit
                 }
-                this._hudSubprocess = null;
-                this._hudStdinStream = null;
+                if (this._hudSubprocess === _proc) {
+                    this._hudSubprocess = null;
+                    this._hudStdinStream = null;
+                }
             });
 
             // Resend current state to newly launched HUD
@@ -233,6 +240,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
     _sendHUDMessage(msg) {
         if (!this._hudStdinStream) return;
         try {
+            if (msg.type === 'sync') msg = { ...msg, sampleTimeUs: GLib.get_monotonic_time(), rate: this._mpris?.rate || 1 };
             const text = JSON.stringify(msg) + '\n';
             const bytes = new GLib.Bytes(new TextEncoder().encode(text));
             this._hudStdinStream.write_bytes_async(bytes, GLib.PRIORITY_DEFAULT, null, null);
@@ -265,7 +273,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             const wmClass = typeof metaWindow.get_wm_class === 'function' ? metaWindow.get_wm_class() : '';
             const appId = typeof metaWindow.get_gtk_application_id === 'function' ? metaWindow.get_gtk_application_id() : '';
 
-            if (title === 'Spotify Floating Lyrics' ||
+            if (title === 'Spicy Lyra Lyrics' || title === 'Spotify Floating Lyrics' ||
                 wmClass === 'dev.norang.SpotifyFloatingLyricsHUD' ||
                 appId === 'dev.norang.SpotifyFloatingLyricsHUD') {
 
@@ -307,12 +315,18 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
 
     _startPositionTicker() {
         if (this._tickerId) return;
+        this._positionRefreshUs = 0;
         this._tickerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
             if (!this._mpris || this._mpris.playbackStatus !== 'Playing') {
                 this._tickerId = null;
                 return GLib.SOURCE_REMOVE;
             }
             const pos = this._mpris.getPositionMs();
+            const now = GLib.get_monotonic_time();
+            if (now - this._positionRefreshUs >= 2000000) {
+                this._positionRefreshUs = now;
+                this._mpris.refreshPosition();
+            }
             this._sync.updatePosition(pos);
             this._popup.updatePosition(pos);
             this._sendHUDMessage({
@@ -332,6 +346,8 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
     }
 
     async _onTrackChanged(track) {
+        const requestId = (this._lyricsRequestId || 0) + 1;
+        this._lyricsRequestId = requestId;
         if (!track || !track.title) {
             this._indicator.updateLyric('');
             this._floatingHUD.updateLine(null, -1, []);
@@ -355,6 +371,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._popup.setLyrics([]);
         this._indicator.updateLyric('');
         this._floatingHUD.updateLine(null, -1, []);
+        this._sendHUDMessage({ type: 'lyrics', title: track.title || '', artist: track.artist || '', lines: [] });
 
         const enableSpicy = this._settings.get_boolean('enable-spicy-lyrics');
         const spicyToken = this._settings.get_string('spicy-lyrics-token');
@@ -379,7 +396,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
 
             // Verify track hasn't changed while awaiting fetch
             const nowTrack = this._mpris.track;
-            if (nowTrack && nowTrack.title === title) {
+            if (requestId === this._lyricsRequestId && nowTrack && nowTrack.title === title) {
                 if (res && Array.isArray(res.lines) && res.lines.length > 0) {
                     this._sync.setLyrics(res.lines);
                     this._popup.setLyrics(res.lines);
@@ -410,6 +427,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
                 }
             }
         } catch (e) {
+            if (requestId !== this._lyricsRequestId || !this._popup) return;
             console.error('[SpotifyFloatingLyrics] Lyrics fetch error:', e);
             this._popup.setLyrics([]);
         }
@@ -423,6 +441,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
     }
 
     disable() {
+        this._lyricsRequestId = (this._lyricsRequestId || 0) + 1;
         this._stopPositionTicker();
         this._stopHUDProcess();
 

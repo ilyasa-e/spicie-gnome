@@ -10,6 +10,7 @@ import Gio from 'gi://Gio';
 import Soup from 'gi://Soup?version=3.0';
 
 import { Romanizer } from './romanizer.js';
+import { parseTtml } from './ttmlParser.js';
 
 export class LyricsProvider {
     constructor(params = {}) {
@@ -179,7 +180,7 @@ export class LyricsProvider {
         const isSpicyCandidate = enableSpicy && Boolean(spicyToken) && Boolean(cleanTrackId);
 
         // 1. In-memory Cache Check
-        const cacheKey = `${safeArtist.toLowerCase()}:${safeTitle.toLowerCase()}:${cleanTrackId}`;
+        const cacheKey = `timing-v2:${isSpicyCandidate ? 'word' : 'line'}:${enableRom}:${safeArtist.toLowerCase()}:${safeTitle.toLowerCase()}:${safeAlbum.toLowerCase()}:${durationSec}:${cleanTrackId}`;
         if (this._cache.has(cacheKey)) {
             const memResult = this._cache.get(cacheKey);
             if (!isSpicyCandidate || memResult.provider === 'spicy_lyrics') {
@@ -240,26 +241,48 @@ export class LyricsProvider {
     }
 
     async _fetchSpicyLyrics(trackId, token, cancellable, enableRom) {
-        const url = `https://api.spicylyrics.org/query?track_id=${encodeURIComponent(trackId)}`;
+        const url = `https://api.spicylyrics.org/v1/lyrics/${encodeURIComponent(trackId)}`;
         const res = await this._sendRequest(url, {
-            headers: { Authorization: `Bearer ${token}` },
-            cancellable
+            headers: { Authorization: `Bearer ${token}` }, cancellable,
         });
-
-        if (res.status === 200 || res.status_code === 200) {
-            const data = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
-            if (data.type === 'syllable_ttml' && data.ttml) {
-                const lines = this._parseTtml(data.ttml, enableRom);
-                return {
-                    provider: 'spicy_lyrics',
-                    instrumental: false,
-                    syncedLyrics: null,
-                    plainLyrics: null,
-                    lines
-                };
-            }
+        if (res.status !== 200 && res.status_code !== 200) {
+            throw new Error(`Word timing unavailable (${res.status || res.status_code}). Check the Spicy Lyrics key.`);
         }
-        return null;
+        const data = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
+        let lines;
+        // Retain compatibility with cached/imported catalogue TTML responses.
+        if (typeof data.ttml === 'string') lines = this._parseTtml(data.ttml, enableRom);
+        else {
+            const body = data.Body || data;
+            lines = [];
+            for (const item of body.Content || []) {
+                const vocal = item.Lead || item;
+                if (item.Type === 'Interlude') continue;
+                let words = '', syllables = [];
+                const input = vocal.Syllables || [];
+                input.forEach((span, i) => {
+                    const text = String(span.Text || '');
+                    const startOffset = words.length;
+                    words += text;
+                    const startTimeMs = Number(span.StartTime) * 1000;
+                    const endTimeMs = Number(span.EndTime) * 1000;
+                    if (text && Number.isFinite(startTimeMs) && Number.isFinite(endTimeMs) && endTimeMs >= startTimeMs)
+                        syllables.push({ text, startTimeMs, endTimeMs, startOffset, endOffset: words.length });
+                    if (i < input.length - 1 && !span.IsPartOfWord && !/\s$/.test(words) && !/^\s/.test(String(input[i + 1].Text || ''))) words += ' ';
+                });
+                if (!input.length) words = String(vocal.Text || item.Text || '');
+                const startTimeMs = Number(vocal.StartTime ?? item.StartTime) * 1000;
+                const endTimeMs = Number(vocal.EndTime ?? item.EndTime) * 1000;
+                if (!words || !Number.isFinite(startTimeMs) || !Number.isFinite(endTimeMs) || endTimeMs <= startTimeMs) continue;
+                lines.push({ id: lines.length, timeMs: startTimeMs, startTimeMs, endTimeMs, words, text: words,
+                    syllables: syllables.length ? syllables : null, timing: syllables.length ? 'syllable' : 'line',
+                    isInterlude: false, romanized: enableRom ? vocal.TransliteratedText || null : null });
+            }
+            lines.sort((a, b) => a.timeMs - b.timeMs);
+            this._attachRomanization(lines, enableRom);
+        }
+        return { provider: 'spicy_lyrics', source: data.Body?.source || 'spicy_lyrics',
+            instrumental: false, syncedLyrics: null, plainLyrics: null, lines };
     }
 
     async _fetchLrclibExact(title, artist, album, durationSec, durationMs, cancellable, enableRom) {
@@ -342,76 +365,16 @@ export class LyricsProvider {
         return null;
     }
 
-    _parseTtml(ttmlText, enableRom) {
-        const lines = [];
-        const pRegex = /<p\s+begin="([^"]+)"\s+end="([^"]+)"[^>]*>([\s\S]*?)<\/p>/gi;
-
-        function parseTimestamp(ts) {
-            if (!ts) return 0;
-            const parts = ts.trim().split(':');
-            if (parts.length === 2) {
-                const min = parseInt(parts[0], 10);
-                const secParts = parts[1].split('.');
-                const sec = parseInt(secParts[0], 10);
-                const ms = secParts[1] ? parseInt(secParts[1].padEnd(3, '0').slice(0, 3), 10) : 0;
-                return (min * 60000) + (sec * 1000) + ms;
-            } else if (parts.length === 3) {
-                const hr = parseInt(parts[0], 10);
-                const min = parseInt(parts[1], 10);
-                const secParts = parts[2].split('.');
-                const sec = parseInt(secParts[0], 10);
-                const ms = secParts[1] ? parseInt(secParts[1].padEnd(3, '0').slice(0, 3), 10) : 0;
-                return (hr * 3600000) + (min * 60000) + (sec * 1000) + ms;
-            }
-            return 0;
-        }
-
-        let pMatch;
-        let id = 0;
-        while ((pMatch = pRegex.exec(ttmlText)) !== null) {
-            const startTimeMs = parseTimestamp(pMatch[1]);
-            const endTimeMs = parseTimestamp(pMatch[2]);
-            const innerContent = pMatch[3];
-
-            const syllables = [];
-            const spanRegex = /<span\s+begin="([^"]+)"\s+end="([^"]+)"[^>]*>([\s\S]*?)<\/span>/gi;
-            let sMatch;
-            let words = '';
-            while ((sMatch = spanRegex.exec(innerContent)) !== null) {
-                const sBegin = parseTimestamp(sMatch[1]);
-                const sEnd = parseTimestamp(sMatch[2]);
-                const sText = sMatch[3].replace(/<[^>]+>/g, '');
-                syllables.push({ text: sText, startTimeMs: sBegin, endTimeMs: sEnd });
-                words += sText;
-            }
-
-            if (syllables.length === 0) {
-                words = innerContent.replace(/<[^>]+>/g, '').trim();
-            } else {
-                words = words.trim();
-            }
-
-            const isInterlude = words.length === 0 || words === '♪' || words.toLowerCase().includes('(instrumental)');
-            let romanized = null;
-            if (enableRom && !isInterlude && Romanizer && typeof Romanizer.hasRomanizableContent === 'function') {
-                if (Romanizer.hasRomanizableContent(words)) {
-                    romanized = Romanizer.romanize(words);
-                }
-            }
-
-            lines.push({
-                id: id++,
-                timeMs: startTimeMs,
-                startTimeMs,
-                endTimeMs,
-                text: words,
-                words,
-                isInterlude,
-                romanized,
-                syllables: syllables.length > 0 ? syllables : null
-            });
+    _attachRomanization(lines, enableRom) {
+        for (const line of lines) {
+            if (enableRom && !line.romanized && Romanizer.hasRomanizableContent(line.words))
+                line.romanized = Romanizer.romanize(line.words);
         }
         return lines;
+    }
+
+    _parseTtml(ttmlText, enableRom) {
+        return this._attachRomanization(parseTtml(ttmlText), enableRom);
     }
 
     parseLRC(lrcText, durationMs = 0, options = {}) {

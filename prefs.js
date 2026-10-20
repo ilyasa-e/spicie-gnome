@@ -7,7 +7,7 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
         window.set_default_size(620, 660);
-        window.title = 'Spotify Floating Lyrics';
+        window.title = 'Spicy Lyra';
         const signals = [];
         const page = (title, icon) => {
             const result = new Adw.PreferencesPage({ title, name: title.toLowerCase(), icon_name: icon });
@@ -65,7 +65,8 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
 
         const floating = group(lyricsPage, 'Desktop lyrics');
         settings.bind('show-floating', floating, 'sensitive', Gio.SettingsBindFlags.GET);
-        choice(floating, 'hud-renderer', 'Animation', 'Smooth highlights words as they are sung.', [
+        toggle(floating, 'animate-lyrics', 'Animate lyrics', 'Highlight characters when word timing is available. Otherwise, show normal lyrics.');
+        choice(floating, 'hud-renderer', 'Display mode', 'Smooth supports character highlighting. Classic shows normal lines.', [
             ['smooth-gtk', 'Smooth'], ['clutter', 'Classic'],
         ]);
         choice(floating, 'floating-position', 'Position', 'Choose where desktop lyrics appear.', [
@@ -99,11 +100,14 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
             icon_name: 'audio-x-generic-symbolic' }));
         const extra = group(sourcesPage, 'Word timing', 'Use Spicy Lyrics for word-by-word timing when available.');
         toggle(extra, 'enable-spicy-lyrics', 'Use Spicy Lyrics', 'Falls back to the default source when unavailable.');
-        const token = new Adw.PasswordEntryRow({ title: 'Spotify access token',
+        const token = new Adw.PasswordEntryRow({ title: 'Spicy Lyrics key',
             text: settings.get_string('spicy-lyrics-token') });
         token.connect('changed', () => settings.set_string('spicy-lyrics-token', token.text.trim()));
         settings.bind('enable-spicy-lyrics', token, 'sensitive', Gio.SettingsBindFlags.GET);
         extra.add(token);
+        const keyHelp = new Adw.ActionRow({ title: 'Get a Spicy Lyrics key', subtitle: 'Spotify access tokens cannot be used here.' });
+        keyHelp.add_suffix(new Gtk.LinkButton({ label: 'Open', uri: 'https://developers.spicylyrics.org/docs/keys', valign: Gtk.Align.CENTER }));
+        extra.add(keyHelp);
         window.connect('close-request', () => {
             signals.forEach(id => settings.disconnect(id));
             signals.length = 0;

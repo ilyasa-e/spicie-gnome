@@ -40,7 +40,7 @@ export class DesktopFloatingHUD {
         });
         // Active Line
         this._activeLabel = new St.Label({
-            text: '♪ Spotify Floating Lyrics',
+            text: '♪ Spicy Lyra',
             style_class: 'spotify-floating-line spotify-floating-active',
         });
         // Romanization Label

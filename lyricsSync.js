@@ -7,6 +7,7 @@
  */
 
 import GObject from 'gi://GObject';
+import { activeLineIndex } from './karaokeTiming.js';
 
 export const LyricsSync = GObject.registerClass({
     GTypeName: 'LyricsSync',
@@ -63,6 +64,8 @@ export const LyricsSync = GObject.registerClass({
                 text,
                 words: text,
                 romanized: line.romanized || null,
+                timing: line.timing || (line.syllables?.length ? 'syllable' : 'line'),
+                syllables: Array.isArray(line.syllables) ? line.syllables.map(span => ({ ...span })) : null,
                 isInterlude: Boolean(
                     line.isInterlude || 
                     text.trim() === '' || 
@@ -89,36 +92,7 @@ export const LyricsSync = GObject.registerClass({
      * @returns {number} Active index (or -1 if before start or in unannotated gap)
      */
     findActiveIndex(positionMs) {
-        if (!this._lines || this._lines.length === 0) return -1;
-        const firstTime = this._lines[0].timeMs;
-        if (positionMs < firstTime) return -1;
-
-        let low = 0;
-        let high = this._lines.length - 1;
-        let candidate = -1;
-
-        while (low <= high) {
-            const mid = Math.floor((low + high) / 2);
-            if (this._lines[mid].timeMs <= positionMs) {
-                candidate = mid;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
-            }
-        }
-
-        if (candidate === -1) return -1;
-
-        // Gap detection between adjacent lines
-        const cur = this._lines[candidate];
-        if (candidate < this._lines.length - 1 && cur.endTimeMs !== null && cur.endTimeMs !== undefined) {
-            const nextTime = this._lines[candidate + 1].timeMs;
-            if (cur.endTimeMs < nextTime && positionMs >= cur.endTimeMs) {
-                return -1; // Between lines
-            }
-        }
-
-        return candidate;
+        return activeLineIndex(this._lines, positionMs);
     }
 
     /**

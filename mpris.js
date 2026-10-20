@@ -68,6 +68,7 @@ export const SpotifyMPRIS = GObject.registerClass({
         this._track = null;
         this._lastPositionUs = 0;
         this._lastTimestampUs = 0;
+        this._positionEpoch = 0;
         this._durationUs = 0;
         this._rate = 1.0;
         this._rawTrackId = '';
@@ -86,6 +87,42 @@ export const SpotifyMPRIS = GObject.registerClass({
 
     get playbackStatus() {
         return this._playbackStatus;
+    }
+
+    get rate() {
+        return this._rate;
+    }
+
+    refreshPosition() {
+        if (!this._proxy?.g_name_owner || this._refreshPending) return Promise.resolve(false);
+        this._refreshPending = true;
+        const track = this._track;
+        const anchor = this._lastTimestampUs;
+        const epoch = this._positionEpoch;
+        const started = this._timeProvider();
+        return new Promise(resolve => {
+            this._proxy.get_connection().call(this._busName, this._objectPath,
+                'org.freedesktop.DBus.Properties', 'Get',
+                new GLib.Variant('(ss)', [this._playerInterface, 'Position']),
+                new GLib.VariantType('(v)'), Gio.DBusCallFlags.NONE, 3000, this._cancellable,
+                (connection, result) => {
+                    this._refreshPending = false;
+                    try {
+                        const value = Number(connection.call_finish(result).recursiveUnpack()[0]);
+                        if (!Number.isFinite(value) || track !== this._track || anchor !== this._lastTimestampUs || epoch !== this._positionEpoch || !this._proxy) {
+                            resolve(false);
+                            return;
+                        }
+                        const now = this._timeProvider();
+                        const delay = this._playbackStatus === 'Playing' ? Math.max(0, now - started) / 2 * this._rate : 0;
+                        this._lastPositionUs = Math.max(0, value + delay);
+                        this._lastTimestampUs = now;
+                        resolve(true);
+                    } catch (e) {
+                        resolve(false);
+                    }
+                });
+        });
     }
 
     get track() {
@@ -428,6 +465,11 @@ export const SpotifyMPRIS = GObject.registerClass({
         }
 
         if ('Rate' in changed) {
+            const now = this._timeProvider();
+            if (this._playbackStatus === 'Playing' && this._lastTimestampUs > 0)
+                this._lastPositionUs += Math.max(0, now - this._lastTimestampUs) * this._rate;
+            this._lastTimestampUs = now;
+            ++this._positionEpoch;
             const numRate = Number(changed.Rate);
             this._rate = (Number.isFinite(numRate) && numRate > 0) ? numRate : 1.0;
         }
@@ -435,6 +477,7 @@ export const SpotifyMPRIS = GObject.registerClass({
         if ('PlaybackStatus' in changed) {
             this._updatePlaybackStatus(changed.PlaybackStatus);
         }
+        if ('Position' in changed) this._onSeeked(changed.Position);
     }
 
     _updateMetadata(rawMetadata) {
@@ -460,6 +503,7 @@ export const SpotifyMPRIS = GObject.registerClass({
         if (this._playbackStatus === newStatus) {
             return;
         }
+        ++this._positionEpoch;
 
         const nowUs = this._timeProvider();
         if (this._playbackStatus === 'Playing' && this._lastTimestampUs > 0) {
@@ -491,6 +535,7 @@ export const SpotifyMPRIS = GObject.registerClass({
     }
 
     _onSeeked(newPositionUs) {
+        ++this._positionEpoch;
         this._lastPositionUs = Math.max(0, Number(newPositionUs) || 0);
         this._lastTimestampUs = this._timeProvider();
         const positionMs = Math.floor(this._lastPositionUs / 1000);

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installer for Spotify Floating Lyrics GNOME Shell Extension
+# Installer for Spicy Lyra GNOME Shell Extension
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,7 +7,7 @@ UUID="spotify-floating-lyrics@norang.dev"
 TARGET_DIR="${HOME}/.local/share/gnome-shell/extensions/${UUID}"
 
 echo "======================================================="
-echo "🎵 Installing Spotify Floating Lyrics GNOME Extension..."
+echo "🎵 Installing Spicy Lyra GNOME Extension..."
 echo "======================================================="
 
 # 1. Compile GSettings schemas in source directory
@@ -33,6 +33,9 @@ cp "${SCRIPT_DIR}/floatingOverlay.js" "${TARGET_DIR}/"
 cp "${SCRIPT_DIR}/mpris.js" "${TARGET_DIR}/"
 cp "${SCRIPT_DIR}/lyricsProvider.js" "${TARGET_DIR}/"
 cp "${SCRIPT_DIR}/lyricsSync.js" "${TARGET_DIR}/"
+cp "${SCRIPT_DIR}/ttmlParser.js" "${TARGET_DIR}/"
+cp "${SCRIPT_DIR}/karaokeTiming.js" "${TARGET_DIR}/"
+cp "${SCRIPT_DIR}/karaokeLayout.js" "${TARGET_DIR}/"
 cp "${SCRIPT_DIR}/romanizer.js" "${TARGET_DIR}/"
 cp "${SCRIPT_DIR}/prefs.js" "${TARGET_DIR}/"
 

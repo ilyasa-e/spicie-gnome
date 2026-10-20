@@ -13,11 +13,14 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import GioUnix from 'gi://GioUnix';
 import Cairo from 'cairo';
+import System from 'system';
+import { KaraokeLayout } from '../karaokeLayout.js';
+import { activeLineIndex } from '../karaokeTiming.js';
 
 import { SpotifyMPRIS } from '../mpris.js';
 import { LyricsProvider } from '../lyricsProvider.js';
 
-class FloatingLyricsHUDApp {
+export class FloatingLyricsHUDApp {
     constructor() {
         this._app = new Gtk.Application({
             application_id: 'dev.norang.SpotifyFloatingLyricsHUD',
@@ -33,10 +36,12 @@ class FloatingLyricsHUDApp {
         this._currentLineIndex = -1;
         this._playbackStatus = 'Stopped';
         this._basePositionMs = 0;
+        this._playbackRate = 1;
         this._baseTimeUs = GLib.get_monotonic_time();
         this._trackTitle = '';
         this._trackArtist = '';
         this._hasStdinLyrics = false;
+        this._requestGeneration = 0;
         this._mpris = null;
         this._lyricsProvider = null;
 
@@ -47,29 +52,19 @@ class FloatingLyricsHUDApp {
 
         this._setupSettings();
         this._app.connect('activate', () => this._onActivate());
+        this._app.connect('shutdown', () => this._shutdown());
     }
 
     _setupSettings() {
         try {
-            const schemaSource = Gio.SettingsSchemaSource.get_default();
-            let schema = schemaSource.lookup('org.gnome.shell.extensions.spotify-floating-lyrics', true);
-
-            if (!schema) {
-                // Try extension directory
-                const extPath = GLib.build_filenamev([
-                    GLib.get_home_dir(),
-                    '.local/share/gnome-shell/extensions/spotify-floating-lyrics@norang.dev/schemas'
-                ]);
-                const dirFile = Gio.File.new_for_path(extPath);
-                if (dirFile.query_exists(null)) {
-                    const customSource = Gio.SettingsSchemaSource.new_from_directory(
-                        dirFile.get_path(),
-                        Gio.SettingsSchemaSource.get_default(),
-                        false
-                    );
-                    schema = customSource.lookup('org.gnome.shell.extensions.spotify-floating-lyrics', true);
-                }
+            const schemaId = 'org.gnome.shell.extensions.spotify-floating-lyrics';
+            const defaultSource = Gio.SettingsSchemaSource.get_default();
+            const localPath = Gio.File.new_for_uri(import.meta.url).get_parent().get_parent().get_child('schemas').get_path();
+            let schema = null;
+            if (GLib.file_test(GLib.build_filenamev([localPath, 'gschemas.compiled']), GLib.FileTest.EXISTS)) {
+                schema = Gio.SettingsSchemaSource.new_from_directory(localPath, defaultSource, false).lookup(schemaId, false);
             }
+            schema ||= defaultSource.lookup(schemaId, true);
 
             if (schema) {
                 this._settings = new Gio.Settings({ settings_schema: schema });
@@ -79,11 +74,15 @@ class FloatingLyricsHUDApp {
                     'line-spacing',
                     'background-style',
                     'enable-romanization',
-                    'floating-click-passthrough'
+                    'floating-click-passthrough',
+                    'animate-lyrics',
+                    'enable-spicy-lyrics',
+                    'spicy-lyrics-token'
                 ];
                 keys.forEach(k => {
                     this._settings.connect(`changed::${k}`, () => {
                         this._onSettingsChanged();
+                        if (['enable-spicy-lyrics', 'spicy-lyrics-token', 'enable-romanization'].includes(k) && !this._hasStdinLyrics && this._mpris) this._loadTrack(this._mpris.track);
                     });
                 });
             }
@@ -100,7 +99,7 @@ class FloatingLyricsHUDApp {
 
         this._win = new Gtk.ApplicationWindow({
             application: this._app,
-            title: 'Spotify Floating Lyrics',
+            title: 'Spicy Lyra Lyrics',
             default_width: 580,
             default_height: 150,
             decorated: false,
@@ -126,11 +125,14 @@ class FloatingLyricsHUDApp {
             this._render(cr, width, height);
         });
 
-        // Frame clock tick callback for smooth animation
+        // Use the display clock. Timing remains in milliseconds; repainting
+        // follows the monitor refresh rather than a millisecond timer.
         this._drawingArea.add_tick_callback(() => {
-            if (this._drawingArea) {
+            const index = this._findActiveIndex(this._getCurrentPositionMs());
+            const animate = this._settings?.get_boolean('animate-lyrics') ?? true;
+            const timed = this._lines[index]?.syllables?.length > 0;
+            if (index !== this._lastDrawnIndex || (animate && timed && this._playbackStatus === 'Playing'))
                 this._drawingArea.queue_draw();
-            }
             return true;
         });
 
@@ -144,7 +146,7 @@ class FloatingLyricsHUDApp {
                 const surface = this._win.get_surface();
                 if (surface && typeof surface.begin_move === 'function') {
                     const device = gesture.get_device();
-                    surface.begin_move(device, 1, x, y, Gtk.get_current_event_time());
+                    surface.begin_move(device, 1, x, y, gesture.get_current_event().get_time());
                 }
             }
         });
@@ -164,6 +166,7 @@ class FloatingLyricsHUDApp {
     }
 
     _onSettingsChanged() {
+        this._karaokeCache = null;
         this._applyClickPassthrough();
         if (this._drawingArea) {
             this._drawingArea.queue_draw();
@@ -196,7 +199,7 @@ class FloatingLyricsHUDApp {
                         const [line] = stream.read_line_finish_utf8(res);
                         if (line === null) {
                             // Extension exited or closed stdin -> cleanly exit HUD
-                            this._app.quit();
+                            if (this._hasStdinLyrics) this._app.quit();
                             return;
                         }
                         this._handleIPCMessage(line);
@@ -216,7 +219,10 @@ class FloatingLyricsHUDApp {
         try {
             const msg = JSON.parse(rawJson);
             if (!msg || !msg.type) return;
+            if (!['lyrics', 'sync', 'exit'].includes(msg.type)) return;
+            if (!this._hasStdinLyrics) this._lyricsProvider?.cancel();
             this._hasStdinLyrics = true;
+            ++this._requestGeneration;
 
             switch (msg.type) {
                 case 'lyrics':
@@ -224,126 +230,104 @@ class FloatingLyricsHUDApp {
                     this._trackTitle = msg.title || '';
                     this._trackArtist = msg.artist || '';
                     this._currentLineIndex = -1;
+                    this._karaokeCache = null;
                     break;
 
                 case 'sync':
                     this._playbackStatus = msg.status || 'Stopped';
                     this._basePositionMs = typeof msg.positionMs === 'number' ? msg.positionMs : 0;
-                    this._baseTimeUs = GLib.get_monotonic_time();
+                    this._baseTimeUs = Number.isFinite(msg.sampleTimeUs) ? msg.sampleTimeUs : GLib.get_monotonic_time();
+                    this._playbackRate = Number(msg.rate) > 0 ? Number(msg.rate) : 1;
                     break;
 
                 case 'exit':
                     this._app.quit();
                     break;
             }
+            this._drawingArea?.queue_draw();
         } catch (e) {
             // Ignore malformed JSON line
         }
     }
 
     _initMPRISFallback() {
+        this._requestGeneration = 0;
+        this._mpris = new SpotifyMPRIS();
+        this._lyricsProvider = new LyricsProvider();
+        this._mpris.connect('track-changed', (_player, track) => {
+            if (!this._hasStdinLyrics) this._loadTrack(track);
+        });
+        this._mpris.connect('status-changed', (_player, status) => {
+            if (this._hasStdinLyrics) return;
+            this._playbackStatus = status;
+            this._drawingArea?.queue_draw();
+        });
+        this._mpris.connect('seeked', () => {
+            if (!this._hasStdinLyrics) this._drawingArea?.queue_draw();
+        });
+        this._mpris.connect('player-available', (_player, available) => {
+            if (!available && !this._hasStdinLyrics) this._loadTrack(null);
+        });
+        // Give the extension's initial messages a chance to arrive before
+        // starting a second catalogue request in standalone mode.
+        this._fallbackStart = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
+            this._fallbackStart = 0;
+            if (!this._hasStdinLyrics) this._loadTrack(this._mpris.track);
+            return GLib.SOURCE_REMOVE;
+        });
+        this._clockRefresh = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2000, () => {
+            if (!this._hasStdinLyrics) this._mpris.refreshPosition();
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    async _loadTrack(track) {
+        const generation = ++this._requestGeneration;
+        this._lines = [];
+        this._karaokeCache = null;
+        this._trackTitle = track?.title || '';
+        this._trackArtist = track?.artist || '';
+        this._playbackStatus = this._mpris.playbackStatus;
+        this._drawingArea?.queue_draw();
+        if (!track?.title) return;
+        const enableRomanization = this._settings?.get_boolean('enable-romanization') ?? true;
         try {
-            this._mpris = new SpotifyMPRIS();
-            this._lyricsProvider = new LyricsProvider();
-
-            this._mpris.connect('track-changed', async (_mpris, track) => {
-                if (this._hasStdinLyrics) return;
-                if (!track || !track.title) {
-                    this._lines = [];
-                    this._trackTitle = '';
-                    this._trackArtist = '';
-                    return;
-                }
-                this._trackTitle = track.title;
-                this._trackArtist = track.artist || '';
-                const durationSec = Math.round((track.durationMs || 0) / 1000);
-                const res = await this._lyricsProvider.fetchLyrics(
-                    track.title,
-                    track.artist || '',
-                    track.album || '',
-                    durationSec,
-                    track.trackId || ''
-                );
-                if (res && res.lines && !this._hasStdinLyrics) {
-                    this._lines = res.lines;
-                }
-            });
-
-            this._mpris.connect('status-changed', (_mpris, status) => {
-                if (this._hasStdinLyrics) return;
-                this._playbackStatus = status;
-                this._basePositionMs = this._mpris.getPositionMs();
-                this._baseTimeUs = GLib.get_monotonic_time();
-            });
-
-            this._mpris.connect('seeked', (_mpris, posMs) => {
-                if (this._hasStdinLyrics) return;
-                this._basePositionMs = posMs;
-                this._baseTimeUs = GLib.get_monotonic_time();
-            });
-
-            // Initial track if already playing
-            const currentTrack = this._mpris.track;
-            if (currentTrack && currentTrack.title) {
-                this._playbackStatus = this._mpris.playbackStatus;
-                this._basePositionMs = this._mpris.getPositionMs();
-                this._baseTimeUs = GLib.get_monotonic_time();
-                this._trackTitle = currentTrack.title;
-                this._trackArtist = currentTrack.artist || '';
-                const durationSec = Math.round((currentTrack.durationMs || 0) / 1000);
-                this._lyricsProvider.fetchLyrics(
-                    currentTrack.title,
-                    currentTrack.artist || '',
-                    currentTrack.album || '',
-                    durationSec,
-                    currentTrack.trackId || ''
-                ).then(res => {
-                    if (res && res.lines && !this._hasStdinLyrics) {
-                        this._lines = res.lines;
-                    }
-                }).catch(() => {});
-            }
+            const result = await this._lyricsProvider.fetchLyrics(track.title, track.artist || '', track.album || '',
+                Math.round((track.durationMs || 0) / 1000), track.trackId || '', {
+                    enableSpicy: this._settings?.get_boolean('enable-spicy-lyrics') ?? false,
+                    spicyToken: this._settings?.get_string('spicy-lyrics-token') || '', enableRomanization,
+                });
+            if (generation !== this._requestGeneration || this._hasStdinLyrics) return;
+            this._lines = result.lines || [];
+            this._drawingArea?.queue_draw();
         } catch (e) {
-            console.error('[HUD] Standalone MPRIS init error:', e.message);
+            if (generation === this._requestGeneration) console.warn(`[Lyrics] ${e.message}`);
         }
     }
 
+    _shutdown() {
+        ++this._requestGeneration;
+        if (this._fallbackStart) GLib.Source.remove(this._fallbackStart);
+        if (this._clockRefresh) GLib.Source.remove(this._clockRefresh);
+        if (this._heightUpdateId) GLib.Source.remove(this._heightUpdateId);
+        this._lyricsProvider?.destroy();
+        this._mpris?.destroy();
+        this._drawingArea = null;
+        this._win = null;
+    }
+
     _getCurrentPositionMs() {
+        if (!this._hasStdinLyrics && this._mpris) return this._mpris.getPositionMs();
         if (this._playbackStatus !== 'Playing') {
             return this._basePositionMs;
         }
         const nowUs = GLib.get_monotonic_time();
         const elapsedMs = (nowUs - this._baseTimeUs) / 1000;
-        return this._basePositionMs + elapsedMs;
+        return this._basePositionMs + Math.max(0, elapsedMs) * this._playbackRate;
     }
 
     _findActiveIndex(posMs) {
-        if (!this._lines || this._lines.length === 0) return -1;
-        if (posMs < this._lines[0].timeMs) return -1;
-
-        let low = 0;
-        let high = this._lines.length - 1;
-        let candidate = -1;
-
-        while (low <= high) {
-            const mid = Math.floor((low + high) / 2);
-            if (this._lines[mid].timeMs <= posMs) {
-                candidate = mid;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
-            }
-        }
-
-        if (candidate >= 0) {
-            const cur = this._lines[candidate];
-            if (cur.endTimeMs && posMs >= cur.endTimeMs) {
-                if (candidate < this._lines.length - 1 && posMs < this._lines[candidate + 1].timeMs) {
-                    return -1; // Interlude between lines
-                }
-            }
-        }
-        return candidate;
+        return activeLineIndex(this._lines, posMs);
     }
 
     _render(cr, width, height) {
@@ -356,6 +340,7 @@ class FloatingLyricsHUDApp {
         const currentPosMs = this._getCurrentPositionMs();
         const activeIdx = this._findActiveIndex(currentPosMs);
         const activeLine = activeIdx >= 0 ? this._lines[activeIdx] : null;
+        this._lastDrawnIndex = activeIdx;
 
         // Settings lookup with safe defaults
         const bgStyle = this._settings ? this._settings.get_string('background-style') : 'transparent';
@@ -373,13 +358,14 @@ class FloatingLyricsHUDApp {
 
         if (!activeLine) {
             // Idle state: Show Spotify or Track title
-            const idleText = this._trackTitle ? `♪ ${this._trackTitle} — ${this._trackArtist}` : '♪ Spotify Floating Lyrics';
-            this._drawTextLine(cr, idleText, `${fontFamily} Bold ${fontSize}`, padX, curY + 16, [1, 1, 1, 0.6]);
+            const idleText = this._trackTitle ? `♪ ${this._trackTitle} — ${this._trackArtist}` : '♪ Spicy Lyra';
+            const height = this._drawTextLine(cr, idleText, `${fontFamily} Bold ${fontSize}`, padX, curY + 16, [1, 1, 1, 0.6], width - padX * 2);
+            this._queueHeight(curY + 16 + height + 22);
             return;
         }
 
         // Active Line with 60 FPS karaoke sweep
-        const activeWords = (activeLine.words || activeLine.text || '').trim();
+        const activeWords = activeLine.words || activeLine.text || '';
         const activeHeight = this._drawKaraokeLine(
             cr,
             activeLine,
@@ -388,7 +374,8 @@ class FloatingLyricsHUDApp {
             fontFamily,
             fontSize,
             padX,
-            curY
+            curY,
+            Math.max(80, width - padX * 2)
         );
         curY += activeHeight + Math.round(lineSpacing * 0.6);
 
@@ -401,7 +388,8 @@ class FloatingLyricsHUDApp {
                 `${fontFamily} Italic ${romajiSize}`,
                 padX,
                 curY,
-                [0.12, 0.84, 0.38, 0.95] // Spotify radiant green
+                [0.12, 0.84, 0.38, 0.95],
+                width - padX * 2
             );
             curY += romHeight + 6;
         }
@@ -413,16 +401,32 @@ class FloatingLyricsHUDApp {
             const nextWords = (nextLine.words || nextLine.text || '').trim();
             if (nextWords) {
                 const nextSize = Math.max(12, Math.round(fontSize * 0.68));
-                this._drawTextLine(
+                const nextHeight = this._drawTextLine(
                     cr,
                     nextWords,
                     `${fontFamily} ${nextSize}`,
                     padX,
                     curY,
-                    [1, 1, 1, 0.38]
+                    [1, 1, 1, 0.38],
+                    width - padX * 2
                 );
+                curY += nextHeight;
             }
         }
+        this._queueHeight(curY + 22);
+    }
+
+    _queueHeight(height) {
+        const desired = Math.min(640, Math.max(150, Math.ceil(height)));
+        if (!this._drawingArea || this._requestedHeight === desired) return;
+        this._requestedHeight = desired;
+        if (this._heightUpdateId) GLib.Source.remove(this._heightUpdateId);
+        this._heightUpdateId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._heightUpdateId = 0;
+            this._drawingArea?.set_content_height(desired);
+            this._win?.set_default_size(this._win.get_width() || 580, desired);
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _drawBackdrop(cr, w, h, style) {
@@ -464,72 +468,23 @@ class FloatingLyricsHUDApp {
         cr.closePath();
     }
 
-    _drawKaraokeLine(cr, line, text, posMs, fontName, fontSize, x, y) {
-        const layout = PangoCairo.create_layout(cr);
-        const fontDesc = Pango.FontDescription.from_string(`${fontName} Bold ${fontSize}`);
-        layout.set_font_description(fontDesc);
-        layout.set_text(text, -1);
-        const [textW, textH] = layout.get_pixel_size();
-
-        // 1. Draw base inactive/dim text (rgba 255, 255, 255, 0.35)
-        cr.setSourceRGBA(1.0, 1.0, 1.0, 0.35);
-        cr.moveTo(x, y);
-        PangoCairo.show_layout(cr, layout);
-
-        // 2. Compute millisecond sweep width
-        let fillWidth = 0;
-        if (Array.isArray(line.syllables) && line.syllables.length > 0) {
-            // Syllable-synced karaoke sweep
-            let accumulatedWidth = 0;
-            for (let i = 0; i < line.syllables.length; i++) {
-                const syl = line.syllables[i];
-                const sylLayout = PangoCairo.create_layout(cr);
-                sylLayout.set_font_description(fontDesc);
-                sylLayout.set_text(syl.text || '', -1);
-                const [sw] = sylLayout.get_pixel_size();
-
-                if (posMs >= syl.endTimeMs) {
-                    accumulatedWidth += sw;
-                } else if (posMs >= syl.startTimeMs && posMs < syl.endTimeMs) {
-                    const sylDuration = Math.max(1, syl.endTimeMs - syl.startTimeMs);
-                    const sylProgress = (posMs - syl.startTimeMs) / sylDuration;
-                    accumulatedWidth += sw * sylProgress;
-                    break;
-                } else {
-                    break;
-                }
-            }
-            fillWidth = Math.min(textW, accumulatedWidth);
-        } else {
-            // Standard line-synced smooth karaoke sweep
-            const lineStart = line.timeMs || line.startTimeMs || 0;
-            const lineEnd = line.endTimeMs || (lineStart + 4500);
-            const duration = Math.max(100, lineEnd - lineStart);
-            const progress = Math.max(0, Math.min(1, (posMs - lineStart) / duration));
-            fillWidth = textW * progress;
+    _drawKaraokeLine(cr, line, text, posMs, fontName, fontSize, x, y, width) {
+        const animate = this._settings?.get_boolean('animate-lyrics') ?? true;
+        const key = `${fontName}:${fontSize}:${width}:${animate}`;
+        if (this._karaokeCache?.line !== line || this._karaokeCache.key !== key) {
+            this._karaokeCache = { line, key, drawing: new KaraokeLayout(cr,
+                animate ? line : { ...line, syllables: null }, `${fontName} Bold ${fontSize}`, width) };
         }
-
-        // 3. Clip and draw active glowing highlight
-        if (fillWidth > 0) {
-            cr.save();
-            cr.rectangle(x, y - 2, fillWidth, textH + 4);
-            cr.clip();
-
-            // Radiant white with slight Spotify green glow
-            cr.setSourceRGBA(1.0, 1.0, 1.0, 1.0);
-            cr.moveTo(x, y);
-            PangoCairo.show_layout(cr, layout);
-            cr.restore();
-        }
-
-        return textH;
+        return this._karaokeCache.drawing.draw(cr, posMs, x, y);
     }
 
-    _drawTextLine(cr, text, fontString, x, y, rgba) {
+    _drawTextLine(cr, text, fontString, x, y, rgba, width = 524) {
         const layout = PangoCairo.create_layout(cr);
         const fontDesc = Pango.FontDescription.from_string(fontString);
         layout.set_font_description(fontDesc);
         layout.set_text(text, -1);
+        layout.set_width(Math.max(1, Math.floor(width)) * Pango.SCALE);
+        layout.set_wrap(Pango.WrapMode.WORD_CHAR);
         const [textW, textH] = layout.get_pixel_size();
 
         cr.setSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
@@ -543,5 +498,7 @@ class FloatingLyricsHUDApp {
     }
 }
 
-const hud = new FloatingLyricsHUDApp();
-hud.run([imports.system.programInvocationName]);
+if (import.meta.url === Gio.File.new_for_path(System.programInvocationName).get_uri()) {
+    const hud = new FloatingLyricsHUDApp();
+    hud.run([System.programInvocationName]);
+}

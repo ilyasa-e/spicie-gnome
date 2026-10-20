@@ -1,6 +1,6 @@
 {
-  "name": "Spotify Floating Lyrics",
-  "description": "Standalone desktop floating lyrics, taskbar lyrics, and popup controller for Spotify via MPRIS D-Bus.",
+  "name": "Spicy Lyra",
+  "description": "Music controls, top-bar lyrics, and floating desktop lyrics with optional word timing.",
   "uuid": "spotify-floating-lyrics@norang.dev",
   "settings-schema": "org.gnome.shell.extensions.spotify-floating-lyrics",
   "shell-version": [
@@ -10,7 +10,7 @@
     "49",
     "50"
   ],
-  "url": "https://github.com/norang/spotify-floating-lyrics-gnome",
+  "url": "https://github.com/ilyasa-e/spicy-lyra-gnome",
   "gettext-domain": "spotify-floating-lyrics",
   "version": 2
 }
