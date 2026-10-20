@@ -92,6 +92,10 @@ export const SpotifyMPRIS = GObject.registerClass({
         return this._track;
     }
 
+    getTrack() {
+        return this._track;
+    }
+
     getMetadata() {
         return this._track;
     }

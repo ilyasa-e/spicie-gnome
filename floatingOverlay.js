@@ -70,20 +70,57 @@ export class DesktopFloatingHUD {
     }
 
     _setupDrag() {
-        this._dragAction = new Clutter.DragAction();
-        this._dragAction.connect('drag-begin', () => {
-            this._container.add_style_pseudo_class('dragging');
-        });
-        this._dragAction.connect('drag-end', () => {
-            this._container.remove_style_pseudo_class('dragging');
-            const [x, y] = this._container.get_position();
-            if (this._settings) {
-                this._settings.set_string('floating-position', 'custom');
-                this._settings.set_int('floating-x', Math.round(x));
-                this._settings.set_int('floating-y', Math.round(y));
+        this._isDragging = false;
+        this._dragStartX = 0;
+        this._dragStartY = 0;
+        this._initialActorX = 0;
+        this._initialActorY = 0;
+
+        this._container.connect('button-press-event', (actor, event) => {
+            if (event.get_button() === 1) { // Left click
+                const passthrough = this._settings ? this._settings.get_boolean('floating-click-passthrough') : false;
+                if (passthrough) return Clutter.EVENT_PROPAGATE;
+
+                this._isDragging = true;
+                const [stageX, stageY] = event.get_coords();
+                this._dragStartX = stageX;
+                this._dragStartY = stageY;
+                const [curX, curY] = this._container.get_position();
+                this._initialActorX = curX;
+                this._initialActorY = curY;
+                this._container.add_style_pseudo_class('dragging');
+                return Clutter.EVENT_STOP;
             }
+            return Clutter.EVENT_PROPAGATE;
         });
-        this._container.add_action(this._dragAction);
+
+        this._container.connect('motion-event', (actor, event) => {
+            if (this._isDragging) {
+                const [stageX, stageY] = event.get_coords();
+                const deltaX = stageX - this._dragStartX;
+                const deltaY = stageY - this._dragStartY;
+                const newX = Math.round(this._initialActorX + deltaX);
+                const newY = Math.round(this._initialActorY + deltaY);
+                this._container.set_position(newX, newY);
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        this._container.connect('button-release-event', (actor, event) => {
+            if (this._isDragging && event.get_button() === 1) {
+                this._isDragging = false;
+                this._container.remove_style_pseudo_class('dragging');
+                const [x, y] = this._container.get_position();
+                if (this._settings) {
+                    this._settings.set_string('floating-position', 'custom');
+                    this._settings.set_int('floating-x', Math.round(x));
+                    this._settings.set_int('floating-y', Math.round(y));
+                }
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
     }
 
     _bindSettings() {
@@ -119,9 +156,6 @@ export class DesktopFloatingHUD {
         // Passthrough click
         const passthrough = this._settings.get_boolean('floating-click-passthrough');
         this._container.reactive = !passthrough;
-        if (this._dragAction) {
-            this._dragAction.enabled = !passthrough;
-        }
 
         // Background Style
         const bgStyle = this._settings.get_string('background-style'); // 'transparent', 'blur', 'dark-card'

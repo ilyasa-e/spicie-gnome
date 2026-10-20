@@ -1,9 +1,10 @@
+import GLib from 'gi://GLib';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import { SpotifyMPRIS } from './mpris.js';
 import { LyricsProvider } from './lyricsProvider.js';
-import { LyricsSyncManager } from './lyricsSync.js';
+import { LyricsSync } from './lyricsSync.js';
 import { SpotifyIndicator } from './indicator.js';
 import { SpotifyLyricsPopup } from './popupMenu.js';
 import { DesktopFloatingHUD } from './floatingOverlay.js';
@@ -15,9 +16,9 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         // 1. Core Services
         this._mpris = new SpotifyMPRIS();
         this._lyricsProvider = new LyricsProvider();
-        this._syncManager = new LyricsSyncManager(this._mpris, this._lyricsProvider, this._settings);
+        this._sync = new LyricsSync();
 
-        // 2. Top Panel Status Indicator
+        // 2. UI Presenters
         this._indicator = new SpotifyIndicator(
             this._settings,
             () => this._toggleFloating(),
@@ -25,7 +26,6 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         );
         Main.panel.addToStatusArea(this.uuid, this._indicator);
 
-        // 3. Tray Popup View
         this._popup = new SpotifyLyricsPopup(
             this._indicator.menu,
             this._settings,
@@ -33,36 +33,149 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             () => this.openPreferences()
         );
 
-        // 4. Desktop Floating HUD Overlay
         this._floatingHUD = new DesktopFloatingHUD(this._settings);
 
-        // 5. Connect Sync Signals to Presenters
-        this._syncSignals = [];
-
-        // Active Line Changed
-        const lineSig = this._syncManager.connect('line-changed', (_mgr, activeLine, activeIndex, allLines) => {
-            const lineText = activeLine ? (activeLine.words || '').trim() : '';
+        // 3. Connect Sync Engine to UI Presenters
+        this._syncSignalId = this._sync.connect('line-changed', (_emitter, index, line) => {
+            const lineText = line ? (line.words || line.text || '').trim() : '';
             this._indicator.updateLyric(lineText);
-            this._floatingHUD.updateLine(activeLine, activeIndex, allLines);
-            this._popup.setActiveLine(activeIndex);
+            this._floatingHUD.updateLine(line, index, this._sync.getLines());
+            this._popup.setActiveLine(index);
         });
-        this._syncSignals.push(lineSig);
 
-        // Track or Playback Status Changed
-        const trackSig = this._syncManager.connect('track-changed', (_mgr, track, isPlaying) => {
+        // 4. Handle MPRIS Signals
+        this._mprisSignals = [];
+
+        // Track Changed
+        const trackSig = this._mpris.connect('track-changed', (_mpris, track) => {
+            this._onTrackChanged(track);
+        });
+        this._mprisSignals.push(trackSig);
+
+        // Status Changed
+        const statusSig = this._mpris.connect('status-changed', (_mpris, status) => {
+            const isPlaying = status === 'Playing';
+            const track = this._mpris.track;
             this._indicator.updatePlayback(isPlaying, track);
             this._popup.updateMetadata(track, isPlaying);
-        });
-        this._syncSignals.push(trackSig);
 
-        // Lyrics Loaded
-        const lyricsSig = this._syncManager.connect('lyrics-loaded', (_mgr, lyrics) => {
-            this._popup.setLyrics(lyrics?.lines || []);
+            if (isPlaying) {
+                this._startPositionTicker();
+            } else {
+                this._stopPositionTicker();
+                const pos = this._mpris.getPositionMs();
+                this._sync.updatePosition(pos);
+            }
         });
-        this._syncSignals.push(lyricsSig);
+        this._mprisSignals.push(statusSig);
 
-        // Start Sync Loop
-        this._syncManager.start();
+        // Seeked
+        const seekSig = this._mpris.connect('seeked', (_mpris, positionMs) => {
+            this._sync.updatePosition(positionMs);
+        });
+        this._mprisSignals.push(seekSig);
+
+        // Player Available
+        const availSig = this._mpris.connect('player-available', (_mpris, isAvailable) => {
+            if (!isAvailable) {
+                this._indicator.updateLyric('');
+                this._indicator.updatePlayback(false, null);
+                this._popup.updateMetadata(null, false);
+                this._popup.setLyrics([]);
+                this._floatingHUD.updateLine(null, -1, []);
+                this._sync.setLyrics([]);
+                this._stopPositionTicker();
+            }
+        });
+        this._mprisSignals.push(availSig);
+
+        // Check if Spotify is already running & playing right now
+        const currentTrack = this._mpris.track;
+        if (currentTrack && currentTrack.title) {
+            this._onTrackChanged(currentTrack);
+        }
+        if (this._mpris.playbackStatus === 'Playing') {
+            this._startPositionTicker();
+        }
+    }
+
+    _startPositionTicker() {
+        if (this._tickerId) return;
+        this._tickerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+            if (!this._mpris || this._mpris.playbackStatus !== 'Playing') {
+                this._tickerId = null;
+                return GLib.SOURCE_REMOVE;
+            }
+            const pos = this._mpris.getPositionMs();
+            this._sync.updatePosition(pos);
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _stopPositionTicker() {
+        if (this._tickerId) {
+            GLib.Source.remove(this._tickerId);
+            this._tickerId = null;
+        }
+    }
+
+    async _onTrackChanged(track) {
+        if (!track || !track.title) {
+            this._indicator.updateLyric('');
+            this._floatingHUD.updateLine(null, -1, []);
+            this._popup.setLyrics([]);
+            this._sync.setLyrics([]);
+            return;
+        }
+
+        const isPlaying = this._mpris.playbackStatus === 'Playing';
+        this._indicator.updatePlayback(isPlaying, track);
+        this._popup.updateMetadata(track, isPlaying);
+
+        // Clear existing lyrics display while fetching
+        this._sync.setLyrics([]);
+        this._popup.setLyrics([]);
+        this._indicator.updateLyric('');
+        this._floatingHUD.updateLine(null, -1, []);
+
+        const enableSpicy = this._settings.get_boolean('enable-spicy-lyrics');
+        const spicyToken = this._settings.get_string('spicy-lyrics-token');
+        const enableRomaji = this._settings.get_boolean('enable-romanization');
+        this._lyricsProvider.setEnableRomanization(enableRomaji);
+
+        try {
+            const title = track.title || '';
+            const artist = track.artist || '';
+            const album = track.album || '';
+            const durationSec = Math.round((track.durationMs || 0) / 1000);
+            const trackId = track.trackId || '';
+
+            const res = await this._lyricsProvider.fetchLyrics(
+                title,
+                artist,
+                album,
+                durationSec,
+                trackId,
+                { enableSpicy, spicyToken }
+            );
+
+            // Verify track hasn't changed while awaiting fetch
+            const nowTrack = this._mpris.track;
+            if (nowTrack && nowTrack.title === title) {
+                if (res && Array.isArray(res.lines) && res.lines.length > 0) {
+                    this._sync.setLyrics(res.lines);
+                    this._popup.setLyrics(res.lines);
+
+                    const pos = this._mpris.getPositionMs();
+                    this._sync.updatePosition(pos);
+                } else {
+                    this._popup.setLyrics([]);
+                }
+            }
+        } catch (e) {
+            console.error('[SpotifyFloatingLyrics] Lyrics fetch error:', e);
+            this._popup.setLyrics([]);
+        }
     }
 
     _toggleFloating() {
@@ -73,15 +186,20 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
     }
 
     disable() {
-        // Stop sync manager and disconnect signals
-        if (this._syncManager) {
-            if (this._syncSignals && this._syncSignals.length > 0) {
-                this._syncSignals.forEach(id => this._syncManager.disconnect(id));
-                this._syncSignals = [];
-            }
-            this._syncManager.stop();
-            this._syncManager.destroy();
-            this._syncManager = null;
+        this._stopPositionTicker();
+
+        if (this._sync && this._syncSignalId) {
+            this._sync.disconnect(this._syncSignalId);
+            this._syncSignalId = 0;
+        }
+        if (this._sync) {
+            this._sync.destroy();
+            this._sync = null;
+        }
+
+        if (this._mpris && this._mprisSignals) {
+            this._mprisSignals.forEach(id => this._mpris.disconnect(id));
+            this._mprisSignals = [];
         }
 
         // Clean up UI presenters
