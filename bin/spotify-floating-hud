@@ -19,6 +19,15 @@ import { activeLineIndex } from '../karaokeTiming.js';
 
 import { SpotifyMPRIS } from '../mpris.js';
 import { LyricsProvider } from '../lyricsProvider.js';
+import { lyricAttribution, attributionMarkup } from '../lyricsAttribution.js';
+import { lineAlignment, activeVocalLines } from '../lyricsPresentation.js';
+
+// Load X11 surface methods when available. Wayland-only GTK builds do not need
+// this namespace; the extension hides their windows through the compositor.
+try {
+    imports.gi.versions.GdkX11 = '4.0';
+    void imports.gi.GdkX11;
+} catch (_) {}
 
 export class FloatingLyricsHUDApp {
     constructor() {
@@ -76,6 +85,7 @@ export class FloatingLyricsHUDApp {
                     'enable-romanization',
                     'floating-click-passthrough',
                     'animate-lyrics',
+                    'lyrics-alignment',
                     'enable-spicy-lyrics',
                     'spicy-lyrics-token'
                 ];
@@ -100,9 +110,16 @@ export class FloatingLyricsHUDApp {
         this._win = new Gtk.ApplicationWindow({
             application: this._app,
             title: 'Spicie',
-            default_width: 580,
-            default_height: 150,
+            default_width: 480,
+            default_height: 90,
             decorated: false,
+        });
+        this._win.connect('realize', () => {
+            // X11 hints are applied before mapping. Wayland uses the extension's
+            // compositor-side window-list control instead.
+            const surface = this._win.get_surface();
+            surface?.set_skip_taskbar_hint?.(true);
+            surface?.set_skip_pager_hint?.(true);
         });
 
         // Set transparent window background via CSS
@@ -112,6 +129,8 @@ export class FloatingLyricsHUDApp {
                 background-color: transparent;
                 background: transparent;
             }
+            .source-credits { color: rgba(255,255,255,0.85); font-size: 12px; }
+            .source-credits link { color: #b4dcff; }
         `, -1);
         Gtk.StyleContext.add_provider_for_display(
             this._win.get_display(),
@@ -130,14 +149,16 @@ export class FloatingLyricsHUDApp {
         this._drawingArea.add_tick_callback(() => {
             const index = this._findActiveIndex(this._getCurrentPositionMs());
             const animate = this._settings?.get_boolean('animate-lyrics') ?? true;
-            const timed = this._lines[index]?.syllables?.length > 0;
-            if (index !== this._lastDrawnIndex || (animate && timed && this._playbackStatus === 'Playing'))
+            const voices = activeVocalLines(this._lines, this._getCurrentPositionMs());
+            const signature = voices.map(line => line.id ?? line.timeMs).join(',');
+            const timed = voices.some(line => line.syllables?.length > 0);
+            if (signature !== this._lastVoices || index !== this._lastDrawnIndex || (animate && timed && this._playbackStatus === 'Playing'))
                 this._drawingArea.queue_draw();
             return true;
         });
 
         // Drag to move window
-        const clickGesture = new Gtk.GestureClick();
+        const clickGesture = new Gtk.GestureClick({ button: 1 });
         clickGesture.connect('pressed', (gesture, nPress, x, y) => {
             const passthrough = this._settings ? this._settings.get_boolean('floating-click-passthrough') : false;
             if (passthrough) return;
@@ -152,7 +173,13 @@ export class FloatingLyricsHUDApp {
         });
         this._drawingArea.add_controller(clickGesture);
 
-        this._win.set_child(this._drawingArea);
+        const overlay = new Gtk.Overlay({ child: this._drawingArea });
+        this._creditsLabel = new Gtk.Label({ use_markup: true, wrap: true,
+            wrap_mode: Pango.WrapMode.WORD_CHAR, xalign: 0, halign: Gtk.Align.FILL,
+            valign: Gtk.Align.END, margin_start: 16, margin_end: 16, margin_bottom: 8,
+            css_classes: ['source-credits'], visible: false });
+        overlay.add_overlay(this._creditsLabel);
+        this._win.set_child(overlay);
         this._win.present();
 
         // Apply initial click passthrough
@@ -167,7 +194,9 @@ export class FloatingLyricsHUDApp {
 
     _onSettingsChanged() {
         this._karaokeCache = null;
+        this._karaokeLayouts = new Map();
         this._applyClickPassthrough();
+        this._drawingArea?.set_cursor_from_name(this._settings?.get_boolean('floating-click-passthrough') ? 'default' : 'move');
         if (this._drawingArea) {
             this._drawingArea.queue_draw();
         }
@@ -227,10 +256,12 @@ export class FloatingLyricsHUDApp {
             switch (msg.type) {
                 case 'lyrics':
                     this._lines = Array.isArray(msg.lines) ? msg.lines : [];
+                    this._setAttribution(this._lines.length ? msg.attribution || {provider:'Unknown source',contributors:[]} : null, msg.expiresAt);
                     this._trackTitle = msg.title || '';
                     this._trackArtist = msg.artist || '';
                     this._currentLineIndex = -1;
                     this._karaokeCache = null;
+                this._karaokeLayouts = new Map();
                     break;
 
                 case 'sync':
@@ -284,7 +315,9 @@ export class FloatingLyricsHUDApp {
     async _loadTrack(track) {
         const generation = ++this._requestGeneration;
         this._lines = [];
+        this._setAttribution(null);
         this._karaokeCache = null;
+        this._karaokeLayouts = new Map();
         this._trackTitle = track?.title || '';
         this._trackArtist = track?.artist || '';
         this._playbackStatus = this._mpris.playbackStatus;
@@ -299,6 +332,7 @@ export class FloatingLyricsHUDApp {
                 });
             if (generation !== this._requestGeneration || this._hasStdinLyrics) return;
             this._lines = result.lines || [];
+            this._setAttribution(lyricAttribution(result), result.expiresAt);
             this._drawingArea?.queue_draw();
         } catch (e) {
             if (generation === this._requestGeneration) console.warn(`[Lyrics] ${e.message}`);
@@ -310,6 +344,7 @@ export class FloatingLyricsHUDApp {
         if (this._fallbackStart) GLib.Source.remove(this._fallbackStart);
         if (this._clockRefresh) GLib.Source.remove(this._clockRefresh);
         if (this._heightUpdateId) GLib.Source.remove(this._heightUpdateId);
+        if (this._lyricsExpiryId) GLib.Source.remove(this._lyricsExpiryId);
         this._lyricsProvider?.destroy();
         this._mpris?.destroy();
         this._drawingArea = null;
@@ -339,7 +374,10 @@ export class FloatingLyricsHUDApp {
 
         const currentPosMs = this._getCurrentPositionMs();
         const activeIdx = this._findActiveIndex(currentPosMs);
-        const activeLine = activeIdx >= 0 ? this._lines[activeIdx] : null;
+        const voices = activeVocalLines(this._lines, currentPosMs);
+        const activeLine = voices[0] || null;
+        this._lastVoices = voices.map(line => line.id ?? line.timeMs).join(',');
+        this._creditsLabel?.set_visible(Boolean(activeLine && this._attribution));
         this._lastDrawnIndex = activeIdx;
 
         // Settings lookup with safe defaults
@@ -353,111 +391,69 @@ export class FloatingLyricsHUDApp {
         this._drawBackdrop(cr, width, height, bgStyle);
 
         // 3. Render Content
-        const padX = 28;
-        let curY = 22;
+        const padX = 16;
+        let curY = 12;
 
         if (!activeLine) {
-            // Idle state: Show Spotify or Track title
-            const idleText = this._trackTitle ? `♪ ${this._trackTitle} — ${this._trackArtist}` : '♪ Spicie';
-            const height = this._drawTextLine(cr, idleText, `${fontFamily} Bold ${fontSize}`, padX, curY + 16, [1, 1, 1, 0.6], width - padX * 2);
-            this._queueHeight(curY + 16 + height + 22);
+            this._queueHeight(40);
             return;
         }
 
-        // Active Line with 60 FPS karaoke sweep
-        const activeWords = activeLine.words || activeLine.text || '';
-        const activeHeight = this._drawKaraokeLine(
-            cr,
-            activeLine,
-            activeWords,
-            currentPosMs,
-            fontFamily,
-            fontSize,
-            padX,
-            curY,
-            Math.max(80, width - padX * 2)
-        );
-        curY += activeHeight + Math.round(lineSpacing * 0.6);
-
-        // Romanization line (if present)
-        if (enableRomaji && activeLine.romanized && activeLine.romanized !== activeWords) {
-            const romajiSize = Math.max(12, Math.round(fontSize * 0.65));
-            const romHeight = this._drawTextLine(
-                cr,
-                activeLine.romanized,
-                `${fontFamily} Italic ${romajiSize}`,
-                padX,
-                curY,
-                [0.12, 0.84, 0.38, 0.95],
-                width - padX * 2
-            );
-            curY += romHeight + 6;
-        }
-
-        // Next Line Preview
-        const nextIdx = activeIdx + 1;
-        if (nextIdx < this._lines.length) {
-            const nextLine = this._lines[nextIdx];
-            const nextWords = (nextLine.words || nextLine.text || '').trim();
-            if (nextWords) {
-                const nextSize = Math.max(12, Math.round(fontSize * 0.68));
-                const nextHeight = this._drawTextLine(
-                    cr,
-                    nextWords,
-                    `${fontFamily} ${nextSize}`,
-                    padX,
-                    curY,
-                    [1, 1, 1, 0.38],
-                    width - padX * 2
-                );
-                curY += nextHeight;
+        for (const line of voices) {
+            const words = line.words || line.text || '';
+            const alignment = lineAlignment(this._settings?.get_string('lyrics-alignment') || 'vocals', line);
+            curY += this._drawKaraokeLine(cr, line, words, currentPosMs, fontFamily, fontSize,
+                padX, curY, Math.max(80, width - padX * 2));
+            if (enableRomaji && line.romanized && line.romanized !== words) {
+                curY += 6 + this._drawTextLine(cr, line.romanized,
+                    `${fontFamily} Italic ${Math.max(12, Math.round(fontSize * 0.65))}`, padX, curY + 6,
+                    [1, 1, 1, 0.8], width - padX * 2, alignment);
             }
+            curY += Math.round(lineSpacing * 0.6);
         }
-        this._queueHeight(curY + 22);
+        this._queueHeight(curY + 10);
     }
 
     _queueHeight(height) {
-        const desired = Math.min(640, Math.max(150, Math.ceil(height)));
+        if (this._creditsLabel?.visible) height += this._creditsLabel.measure(Gtk.Orientation.VERTICAL,
+            Math.max(80, (this._drawingArea?.get_width() || 480) - 32))[1] + 12;
+        const desired = Math.min(640, Math.max(56, Math.ceil(height)));
         if (!this._drawingArea || this._requestedHeight === desired) return;
         this._requestedHeight = desired;
         if (this._heightUpdateId) GLib.Source.remove(this._heightUpdateId);
         this._heightUpdateId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
             this._heightUpdateId = 0;
             this._drawingArea?.set_content_height(desired);
-            this._win?.set_default_size(this._win.get_width() || 580, desired);
+            this._win?.set_default_size(this._win.get_width() || 480, desired);
             return GLib.SOURCE_REMOVE;
         });
     }
 
+    _setAttribution(attribution, expiresAt = null) {
+        if (this._lyricsExpiryId) GLib.Source.remove(this._lyricsExpiryId);
+        this._lyricsExpiryId = 0;
+        this._attribution = attribution;
+        this._creditsLabel?.set_markup(attributionMarkup(attribution));
+        this._creditsLabel?.set_visible(Boolean(attribution && this._lines.length));
+        if (Number.isFinite(expiresAt)) this._lyricsExpiryId = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
+            Math.max(1, Math.min(4294967295, expiresAt - Date.now())), () => {
+                this._lyricsExpiryId = 0;
+                this._lines = [];
+                this._karaokeCache = null;
+                this._karaokeLayouts = new Map();
+                this._setAttribution(null);
+                this._drawingArea?.queue_draw();
+                if (!this._hasStdinLyrics && this._mpris) this._loadTrack(this._mpris.track);
+                return GLib.SOURCE_REMOVE;
+            });
+    }
+
     _drawBackdrop(cr, w, h, style) {
-        if (style === 'transparent') {
-            // Very subtle dark vignette for readability on light wallpapers
-            this._roundedRect(cr, 8, 8, w - 16, h - 16, 20);
-            cr.setSourceRGBA(0, 0, 0, 0.28);
-            cr.fill();
-            return;
-        }
-
-        const radius = 22;
-        this._roundedRect(cr, 8, 8, w - 16, h - 16, radius);
-
-        if (style === 'blur') {
-            // Glassmorphic translucent pill
-            cr.setSourceRGBA(0.1, 0.12, 0.16, 0.72);
-            cr.fillPreserve();
-            // Subtle frosted border
-            cr.setSourceRGBA(1.0, 1.0, 1.0, 0.14);
-            cr.setLineWidth(1.2);
-            cr.stroke();
-        } else if (style === 'dark-card') {
-            // Obsidian dark card
-            cr.setSourceRGBA(0.06, 0.07, 0.09, 0.92);
-            cr.fillPreserve();
-            // Neon accent border
-            cr.setSourceRGBA(0.12, 0.84, 0.38, 0.3);
-            cr.setLineWidth(1.2);
-            cr.stroke();
-        }
+        if (style === 'transparent') return;
+        this._roundedRect(cr, 0, 0, w, h, 6);
+        const alpha = style === 'dark-card' ? 0.92 : 0.65;
+        cr.setSourceRGBA(0.06, 0.07, 0.09, alpha);
+        cr.fill();
     }
 
     _roundedRect(cr, x, y, w, h, r) {
@@ -470,21 +466,28 @@ export class FloatingLyricsHUDApp {
 
     _drawKaraokeLine(cr, line, text, posMs, fontName, fontSize, x, y, width) {
         const animate = this._settings?.get_boolean('animate-lyrics') ?? true;
-        const key = `${fontName}:${fontSize}:${width}:${animate}`;
-        if (this._karaokeCache?.line !== line || this._karaokeCache.key !== key) {
-            this._karaokeCache = { line, key, drawing: new KaraokeLayout(cr,
-                animate ? line : { ...line, syllables: null }, `${fontName} Bold ${fontSize}`, width) };
+        const alignment = lineAlignment(this._settings?.get_string?.('lyrics-alignment') || 'vocals', line);
+        const key = `${fontName}:${fontSize}:${width}:${animate}:${alignment}`;
+        this._karaokeLayouts ||= new Map();
+        let cache = this._karaokeLayouts.get(line);
+        if (cache?.key !== key) {
+            cache = { line, key, drawing: new KaraokeLayout(cr,
+                animate ? line : { ...line, syllables: null }, `${fontName} Bold ${fontSize}`, width, alignment) };
+            this._karaokeLayouts.set(line, cache);
         }
+        this._karaokeCache = cache;
         return this._karaokeCache.drawing.draw(cr, posMs, x, y);
     }
 
-    _drawTextLine(cr, text, fontString, x, y, rgba, width = 524) {
+    _drawTextLine(cr, text, fontString, x, y, rgba, width = 524, alignment = 'center') {
         const layout = PangoCairo.create_layout(cr);
         const fontDesc = Pango.FontDescription.from_string(fontString);
         layout.set_font_description(fontDesc);
         layout.set_text(text, -1);
         layout.set_width(Math.max(1, Math.floor(width)) * Pango.SCALE);
         layout.set_wrap(Pango.WrapMode.WORD_CHAR);
+        layout.set_auto_dir(false);
+        layout.set_alignment(({left:Pango.Alignment.LEFT,center:Pango.Alignment.CENTER,right:Pango.Alignment.RIGHT})[alignment]);
         const [textW, textH] = layout.get_pixel_size();
 
         cr.setSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);

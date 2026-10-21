@@ -2,7 +2,10 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
+import Pango from 'gi://Pango';
+import { floatingPosition, lineAlignment, activeVocalLines } from './lyricsPresentation.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import { SourceCredits } from './sourceCredits.js';
 
 export class DesktopFloatingHUD {
     constructor(settings) {
@@ -57,8 +60,13 @@ export class DesktopFloatingHUD {
 
         this._contentBox.add_child(this._prevLabel);
         this._contentBox.add_child(this._activeLabel);
+        this._voiceBox = new St.BoxLayout({ vertical: true });
+        this._voiceLabels = [];
+        this._contentBox.add_child(this._voiceBox);
         this._contentBox.add_child(this._romajiLabel);
         this._contentBox.add_child(this._nextLabel);
+        this._credits = new SourceCredits();
+        this._contentBox.add_child(this._credits.actor);
 
         // Drag action support
         this._setupDrag();
@@ -66,6 +74,8 @@ export class DesktopFloatingHUD {
         // Add to GNOME TopChrome (stays above standard windows)
         Main.layoutManager.addTopChrome(this._container);
 
+        this._container.connect('notify::width', () => this._queueReposition());
+        this._container.connect('notify::height', () => this._queueReposition());
         this.applySettings();
     }
 
@@ -139,6 +149,7 @@ export class DesktopFloatingHUD {
             'background-style',
             'enable-romanization',
             'hud-renderer',
+            'lyrics-alignment',
         ];
 
         keys.forEach(key => {
@@ -176,60 +187,71 @@ export class DesktopFloatingHUD {
         this._nextLabel.style = `font-family: "${fontFamily}", sans-serif; font-size: ${Math.round(fontSize * 0.72)}px; margin-top: ${Math.round(lineSpacing / 2)}px;`;
         this._romajiLabel.style = `font-family: "${fontFamily}", sans-serif; font-size: ${Math.round(fontSize * 0.58)}px;`;
 
+        this.updatePosition(this._positionMs || 0);
         // Position
         this._reposition();
     }
 
+    _queueReposition() {
+        if (this._repositionId) return;
+        this._repositionId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._repositionId = 0;
+            this._reposition();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
     _reposition() {
-        if (!this._container || !this._settings) return;
+        if (!this._container || !this._settings || !this._container.get_stage()) return;
 
-        const monitor = Main.layoutManager.primaryMonitor;
-        if (!monitor) return;
+        const index = Main.layoutManager.primaryIndex;
+        if (index < 0) return;
+        const area = Main.layoutManager.getWorkAreaForMonitor(index);
+        const { x, y } = floatingPosition(area, this._container.width || 420, this._container.height || 160,
+            this._settings.get_string('floating-position'), this._settings.get_int('floating-x'), this._settings.get_int('floating-y'));
+        if (this._container.x !== x || this._container.y !== y) this._container.set_position(x, y);
+    }
 
-        const posMode = this._settings.get_string('floating-position');
-        const width = this._container.width || 420;
-        const height = this._container.height || 160;
+    _alignLabel(label, line) {
+        const alignment = lineAlignment(this._settings?.get_string('lyrics-alignment') || 'vocals', line);
+        const style = (label.style || '').replace(/ text-align: [^;]+;/g, '') + ` text-align: ${alignment};`;
+        if (label.style !== style) label.style = style;
+        label.clutter_text.set_line_alignment(({left:Pango.Alignment.LEFT,center:Pango.Alignment.CENTER,right:Pango.Alignment.RIGHT})[alignment]);
+        label.clutter_text.set_line_wrap(true);
+        label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+    }
 
-        let targetX = monitor.x + monitor.width - width - 60;
-        let targetY = monitor.y + 80;
-
-        switch (posMode) {
-            case 'top-left':
-                targetX = monitor.x + 60;
-                targetY = monitor.y + 80;
-                break;
-            case 'bottom-left':
-                targetX = monitor.x + 60;
-                targetY = monitor.y + monitor.height - height - 80;
-                break;
-            case 'bottom-right':
-                targetX = monitor.x + monitor.width - width - 60;
-                targetY = monitor.y + monitor.height - height - 80;
-                break;
-            case 'center':
-                targetX = monitor.x + Math.round((monitor.width - width) / 2);
-                targetY = monitor.y + Math.round((monitor.height - height) / 2);
-                break;
-            case 'custom':
-                targetX = this._settings.get_int('floating-x');
-                targetY = this._settings.get_int('floating-y');
-                // Boundary clamp
-                targetX = Math.max(monitor.x, Math.min(monitor.x + monitor.width - 100, targetX));
-                targetY = Math.max(monitor.y, Math.min(monitor.y + monitor.height - 60, targetY));
-                break;
-            case 'top-right':
-            default:
-                targetX = monitor.x + monitor.width - width - 60;
-                targetY = monitor.y + 80;
-                break;
+    updatePosition(positionMs) {
+        this._positionMs = positionMs;
+        const voices = activeVocalLines(this._allLines, positionMs);
+        this._activeLine = voices[0] || null;
+        this._credits.actor.visible = Boolean(this._attribution && voices.length);
+        this._voiceBox.visible = voices.length > 1;
+        if (voices.length > 1) { this._prevLabel.text = ''; this._nextLabel.text = ''; }
+        this._voiceLabels.forEach((label, i) => { label.visible = i < voices.length - 1; });
+        if (voices.length) {
+            this._activeLabel.text = voices[0].words || voices[0].text || '';
+            this._alignLabel(this._activeLabel, voices[0]);
+            voices.slice(1).forEach((line, i) => {
+                if (!this._voiceLabels[i]) {
+                    this._voiceLabels[i] = new St.Label({ style_class: 'spotify-floating-line spotify-floating-active' });
+                    this._voiceBox.add_child(this._voiceLabels[i]);
+                }
+                const label = this._voiceLabels[i];
+                label.text = line.words || line.text || '';
+                const style = (this._activeLabel.style || '').replace(/ text-align: [^;]+;/g, '');
+                if (!(label.style || '').startsWith(style)) label.style = style;
+                this._alignLabel(label, line);
+                label.show();
+            });
         }
-
-        this._container.set_position(targetX, targetY);
     }
 
     updateLine(activeLine, activeIndex, allLines) {
         this._activeLine = activeLine;
         this._allLines = allLines || [];
+        this._voiceBox.visible = false;
+        this._credits.actor.visible = Boolean(this._attribution && activeLine && activeIndex >= 0);
 
         if (!activeLine || activeIndex < 0) {
             this._prevLabel.text = '';
@@ -259,6 +281,16 @@ export class DesktopFloatingHUD {
 
         const next = this._allLines[activeIndex + 1];
         this._nextLabel.text = next ? (next.words || '').trim() : '';
+        this._alignLabel(this._prevLabel, prev);
+        this._alignLabel(this._nextLabel, next);
+        this._alignLabel(this._romajiLabel, activeLine);
+        this.updatePosition(this._positionMs ?? activeLine.startTimeMs ?? activeLine.timeMs ?? 0);
+    }
+
+    setAttribution(attribution) {
+        this._attribution = attribution;
+        this._credits.setAttribution(attribution);
+        this._credits.actor.visible = Boolean(attribution && this._activeLine);
     }
 
     destroy() {
@@ -267,10 +299,13 @@ export class DesktopFloatingHUD {
             this._settingsSignals = [];
         }
 
+        if (this._repositionId) GLib.Source.remove(this._repositionId);
+        this._repositionId = 0;
         if (this._container) {
-            Main.layoutManager.removeChrome(this._container);
-            this._container.destroy();
+            const container = this._container;
             this._container = null;
+            Main.layoutManager.removeChrome(container);
+            container.destroy();
         }
     }
 }

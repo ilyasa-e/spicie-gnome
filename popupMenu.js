@@ -1,4 +1,5 @@
 import Clutter from 'gi://Clutter';
+import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import { PlayerCard } from './playerCard.js';
@@ -38,15 +39,25 @@ export class SpotifyLyricsPopup {
         this._pinned?.updatePosition(position);
     }
 
-    // Lyrics remain on the top bar and the dedicated floating surface.
-    setLyrics(_lines) {}
-    setActiveLine(_index) {}
+    setAvailable(available) {
+        this._available = available;
+        this._syncPinned();
+        if (!available) this._menu.close();
+    }
+
+    setLyrics(lines) { this._lines = lines || []; this.setActiveLine(-1); }
+    setActiveLine(index) {
+        this._lyric = this._lines?.[index]?.words || this._lines?.[index]?.text || '';
+        this._card.setLyric(this._lyric);this._pinned?.setLyric(this._lyric);
+    }
+    setAttribution(attribution) {
+        this._attribution = attribution;
+        this._card.setAttribution(attribution);this._pinned?.setAttribution(attribution);
+    }
 
     _syncPinned() {
-        if (!this._settings.get_boolean('player-pinned')) {
-            this._grab?.dismiss();
-            this._grab = null;
-            this._dragging = false;
+        if (!this._settings.get_boolean('player-pinned') || this._available === false) {
+            this._finishDrag(false);
             if (this._pinned) {
                 Main.layoutManager.removeChrome(this._pinned.actor);
                 this._pinned.destroy();
@@ -58,6 +69,7 @@ export class SpotifyLyricsPopup {
             this._pinned = new PlayerCard(this._settings, this._mpris, this._openPrefs);
             this._pinned.setArtwork(this._artwork.value);
             this._pinned.updateMetadata(this._track, this._playing);
+            this._pinned.setLyric(this._lyric);this._pinned.setAttribution(this._attribution);
             Main.layoutManager.addChrome(this._pinned.actor, { trackFullscreen: true });
             this._setupDrag();
             this._pinned.actor.connect('notify::allocation', () => this._positionPinned());
@@ -71,8 +83,8 @@ export class SpotifyLyricsPopup {
         if (!monitor) return;
         const area = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
         const actor = this._pinned.actor;
-        const width = actor.width || (this._settings.get_string('player-layout') === 'horizontal' ? 470 : 352);
-        const height = actor.height || 260;
+        const width = actor.width || (this._settings.get_string('player-layout') === 'horizontal' ? 344 : 164);
+        const height = actor.height || 180;
         const x = this._settings.get_int('player-x');
         const y = this._settings.get_int('player-y');
         actor.set_position(Math.max(area.x, Math.min(area.x + area.width - width, x)),
@@ -81,34 +93,46 @@ export class SpotifyLyricsPopup {
 
     _setupDrag() {
         const card = this._pinned;
-        card.header.connect('button-press-event', (_actor, event) => {
-            if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
+        card.actor.connect('button-press-event', (_actor, event) => {
+            if (event.get_button() !== 1 || this._dragging) return Clutter.EVENT_PROPAGATE;
             const [x, y] = event.get_coords();
+            let source = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
+            while (source && source !== card.actor) {
+                if (source instanceof St.Button || source === card._slider) return Clutter.EVENT_PROPAGATE;
+                source = source.get_parent();
+            }
             this._dragOffset = [x - card.actor.x, y - card.actor.y];
             this._dragging = true;
-            this._grab = global.stage.grab(card.header);
+            this._grab = global.stage.grab(card.actor);
             return Clutter.EVENT_STOP;
         });
-        card.header.connect('motion-event', (_actor, event) => {
+        card.actor.connect('motion-event', (_actor, event) => {
             if (!this._dragging) return Clutter.EVENT_PROPAGATE;
             const [x, y] = event.get_coords();
             card.actor.set_position(x - this._dragOffset[0], y - this._dragOffset[1]);
             return Clutter.EVENT_STOP;
         });
-        card.header.connect('button-release-event', () => {
+        card.actor.connect('button-release-event', () => {
             if (!this._dragging) return Clutter.EVENT_PROPAGATE;
-            this._dragging = false;
-            this._grab?.dismiss();
-            this._grab = null;
-            this._settings.set_int('player-x', Math.round(card.actor.x));
-            this._settings.set_int('player-y', Math.round(card.actor.y));
-            this._positionPinned();
+            this._finishDrag(true);
             return Clutter.EVENT_STOP;
         });
     }
 
+    _finishDrag(save) {
+        // Keep the guard set while both settings change. Each write triggers a position refresh.
+        if (save && this._pinned) {
+            const [x, y] = this._pinned.actor.get_position();
+            this._settings.set_int('player-x', Math.round(x));
+            this._settings.set_int('player-y', Math.round(y));
+        }
+        this._dragging = false;
+        this._grab?.dismiss();this._grab = null;
+        if (save) this._positionPinned();
+    }
+
     destroy() {
-        this._grab?.dismiss();
+        this._finishDrag(false);
         this._artwork.destroy();
         this._signals.forEach(id => this._settings.disconnect(id));
         Main.layoutManager.disconnect(this._monitorSignal);

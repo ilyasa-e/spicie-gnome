@@ -9,6 +9,16 @@
       <description>Display the active line of Spotify lyrics directly inside the GNOME Shell Top Bar panel.</description>
     </key>
 
+    <key name="panel-position" type="s">
+      <choices><choice value="left"/><choice value="right"/></choices>
+      <default>'right'</default>
+      <summary>Top bar position</summary>
+    </key>
+    <key name="show-player-lyrics" type="b">
+      <default>false</default>
+      <summary>Show lyrics in the player</summary>
+    </key>
+
     <key name="show-floating" type="b">
       <default>true</default>
       <summary>Show floating desktop overlay</summary>
@@ -29,16 +39,30 @@
 
     <key name="floating-position" type="s">
       <choices>
+        <choice value="top-center"/>
         <choice value="top-left"/>
         <choice value="top-right"/>
         <choice value="bottom-left"/>
         <choice value="bottom-right"/>
+        <choice value="bottom-center"/>
         <choice value="center"/>
         <choice value="custom"/>
       </choices>
-      <default>'top-right'</default>
+      <default>'top-center'</default>
       <summary>Floating HUD position preset</summary>
       <description>Screen corner preset or custom coordinate mode for the floating overlay.</description>
+    </key>
+
+    <key name="lyrics-alignment" type="s">
+      <choices>
+        <choice value="vocals"/>
+        <choice value="left"/>
+        <choice value="center"/>
+        <choice value="right"/>
+      </choices>
+      <default>'vocals'</default>
+      <summary>Lyrics text alignment</summary>
+      <description>Align text left, center, right, or follow vocalist positions from the source. Without vocalist positions, use center alignment.</description>
     </key>
 
     <key name="floating-x" type="i">
@@ -144,8 +168,8 @@
         <choice value="clutter"/>
       </choices>
       <default>'smooth-gtk'</default>
-      <summary>Floating HUD renderer mode</summary>
-      <description>Select between smooth 60fps standalone GTK4 renderer or in-shell Clutter actor.</description>
+      <summary>Legacy renderer setting</summary>
+      <description>Retained for settings compatibility. The extension now uses a single floating lyrics window.</description>
     </key>
 
   </schema>

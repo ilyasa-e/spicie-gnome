@@ -7,7 +7,7 @@
  */
 
 import GObject from 'gi://GObject';
-import { activeLineIndex } from './karaokeTiming.js';
+import { displayLineIndex } from './karaokeTiming.js';
 
 export const LyricsSync = GObject.registerClass({
     GTypeName: 'LyricsSync',
@@ -64,6 +64,7 @@ export const LyricsSync = GObject.registerClass({
                 text,
                 words: text,
                 romanized: line.romanized || null,
+                oppositeAligned: typeof line.oppositeAligned === 'boolean' ? line.oppositeAligned : null,
                 timing: line.timing || (line.syllables?.length ? 'syllable' : 'line'),
                 syllables: Array.isArray(line.syllables) ? line.syllables.map(span => ({ ...span })) : null,
                 isInterlude: Boolean(
@@ -89,10 +90,10 @@ export const LyricsSync = GObject.registerClass({
     /**
      * Resolves the active line index for a given playback timestamp.
      * @param {number} positionMs
-     * @returns {number} Active index (or -1 if before start or in unannotated gap)
+     * @returns {number} Displayed index, held between phrases; -1 before the first timed word
      */
     findActiveIndex(positionMs) {
-        return activeLineIndex(this._lines, positionMs);
+        return displayLineIndex(this._lines, positionMs);
     }
 
     /**

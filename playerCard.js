@@ -3,6 +3,7 @@ import Clutter from 'gi://Clutter';
 import Pango from 'gi://Pango';
 import GLib from 'gi://GLib';
 import * as Slider from 'resource:///org/gnome/shell/ui/slider.js';
+import { SourceCredits } from './sourceCredits.js';
 import { DEFAULT_PALETTE, formatTime } from './playerTheme.js';
 
 export class PlayerCard {
@@ -17,7 +18,7 @@ export class PlayerCard {
         this._body = new St.BoxLayout({ vertical: true, style_class: 'spotify-player-body' });
         this.actor.add_child(this._body);
         this.header = new St.BoxLayout({ style_class: 'spotify-player-header', reactive: true, x_expand: true });
-        this._cover = new St.Icon({ icon_name: 'audio-x-generic-symbolic', style_class: 'spotify-player-cover', icon_size: 66 });
+        this._cover = new St.Icon({ icon_name: 'audio-x-generic-symbolic', style_class: 'spotify-player-cover', icon_size: 44 });
         this._title = new St.Label({ text: 'No song playing', style_class: 'spotify-player-title', x_expand: true });
         this._title.clutter_text.ellipsize = Pango.EllipsizeMode.END;
         this._artist = new St.Label({ text: 'Play a song in Spotify', style_class: 'spotify-player-artist', x_expand: true });
@@ -63,24 +64,30 @@ export class PlayerCard {
             });
         });
         this._progress.add_child(this._slider);
-        const times = new St.BoxLayout({ style_class: 'spotify-player-times' });
+        this._times = new St.BoxLayout({ style_class: 'spotify-player-times' });
         this._elapsed = new St.Label({ text: '0:00', x_expand: true });
         this._total = new St.Label({ text: '0:00', x_align: Clutter.ActorAlign.END });
-        times.add_child(this._elapsed);
-        times.add_child(this._total);
-        this._progress.add_child(times);
-        const footer = new St.BoxLayout({ style_class: 'spotify-player-footer' });
+        this._times.add_child(this._elapsed);
+        this._times.add_child(this._total);
+        this._lyricBox = new St.BoxLayout({ vertical: true, style_class: 'spotify-player-inline-lyrics', visible: false });
+        this._lyricLine = new St.Label({ text: '', x_expand: true });
+        this._lyricLine.clutter_text.set_line_wrap(true);
+        this._lyricLine.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+        this._credits = new SourceCredits({ vertical: true });
+        this._lyricBox.add_child(this._lyricLine);this._lyricBox.add_child(this._credits.actor);
+        this.actor.add_child(this._lyricBox);
+        this._footer = new St.BoxLayout({ style_class: 'spotify-player-footer' });
         this._lyrics = new St.Button({ label: 'Desktop lyrics', style_class: 'spotify-player-lyrics', can_focus: true, x_expand: true, x_align: Clutter.ActorAlign.START });
         this._lyrics.connect('clicked', () => settings.set_boolean('show-floating', !settings.get_boolean('show-floating')));
         this._pin = this._button('view-pin-symbolic', 'Keep player on desktop', () => settings.set_boolean('player-pinned', !settings.get_boolean('player-pinned')));
         this._pin.add_style_class_name('spotify-player-utility');
         this._prefs = this._button('emblem-system-symbolic', 'Settings', () => this._onOpenPrefs());
         this._prefs.add_style_class_name('spotify-player-utility');
-        footer.add_child(this._lyrics);
-        footer.add_child(this._pin);
-        footer.add_child(this._prefs);
-        this.actor.add_child(footer);
-        for (const key of ['player-layout', 'show-floating', 'player-pinned'])
+        this._footer.add_child(this._lyrics);
+        this._footer.add_child(this._pin);
+        this._footer.add_child(this._prefs);
+        this.actor.add_child(this._footer);
+        for (const key of ['player-layout', 'show-floating', 'player-pinned', 'show-player-lyrics'])
             this._signals.push(settings.connect(`changed::${key}`, () => this._applySettings()));
         this._applySettings();
         this.updateMetadata(null, false);
@@ -96,9 +103,9 @@ export class PlayerCard {
 
     _applySettings() {
         const horizontal = this._settings.get_string('player-layout') === 'horizontal';
-        [this.header, this._controls, this._progress].forEach(actor => actor.get_parent()?.remove_child(actor));
+        [this.header, this._controls, this._progress, this._times].forEach(actor => actor.get_parent()?.remove_child(actor));
         this._body.destroy_all_children();
-        this.actor.set_style_class_name(`spotify-player-card${horizontal ? ' horizontal' : ''}`);
+        this.actor.set_style_class_name(`spotify-player-card ${horizontal ? 'horizontal' : 'compact'}`);
         if (horizontal) {
             const row = new St.BoxLayout({ style_class: 'spotify-player-top-row' });
             row.add_child(this.header);
@@ -109,11 +116,19 @@ export class PlayerCard {
             this._body.add_child(this._controls);
         }
         this._body.add_child(this._progress);
-        this._cover.icon_size = horizontal ? 58 : 66;
+        this._cover.visible = true;
+        this._cover.icon_size = horizontal ? 38 : 32;
+        this._times.x_expand = true;
+        this._elapsed.x_expand = true;
+        this._progress.add_child(this._times);
+        this._lyrics.x_expand = true;
+        this._lyricBox.visible = this._settings.get_boolean('show-player-lyrics') && Boolean(this._lyricLine.text);
         const floating = this._settings.get_boolean('show-floating');
         this._lyrics.accessible_name = floating ? 'Hide desktop lyrics' : 'Show desktop lyrics';
-        this._lyrics.set_label(floating ? 'Desktop lyrics on' : 'Desktop lyrics');
+        this._lyrics.set_label(horizontal ? (floating ? 'Desktop lyrics on' : 'Desktop lyrics') : 'Lyrics');
         this._lyrics.set_style_class_name(`spotify-player-lyrics${floating ? ' enabled' : ''}`);
+        if (floating) this._lyrics.add_style_pseudo_class('checked');
+        else this._lyrics.remove_style_pseudo_class('checked');
         const pinned = this._settings.get_boolean('player-pinned');
         this._pin.accessible_name = pinned ? 'Unpin player' : 'Keep player on desktop';
         if (pinned) this._pin.add_style_pseudo_class('checked');
@@ -123,13 +138,20 @@ export class PlayerCard {
 
     _applyPalette() {
         const p = this._palette;
-        this.actor.style = `background-color: ${p.surface}; background-gradient-direction: diagonal; background-gradient-start: ${p.top}; background-gradient-end: ${p.surface}; color: ${p.foreground};`;
+        this.actor.style = `background-color: ${p.surface}; background-gradient-direction: vertical; background-gradient-start: ${p.top}; background-gradient-end: ${p.surface}; color: ${p.foreground};`;
         this._artist.style = `color: ${p.secondary};`;
         this._progress.style = `color: ${p.secondary};`;
         this._lyrics.style = `color: ${p.secondary};`;
         this._play.style = `background-color: ${p.accent}; color: ${p.surface};`;
         this._slider.style = `color: ${p.foreground}; -barlevel-active-background-color: ${p.accent};`;
     }
+
+    setLyric(text) {
+        this._lyricLine.text = text || '';
+        this._lyricBox.visible = this._settings.get_boolean('show-player-lyrics') && Boolean(text);
+    }
+
+    setAttribution(attribution) { this._credits.setAttribution(attribution); }
 
     setArtwork({ gicon, palette }) {
         this._cover.gicon = gicon;

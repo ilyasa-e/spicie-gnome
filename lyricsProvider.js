@@ -12,6 +12,8 @@ import Soup from 'gi://Soup?version=3.0';
 import { Romanizer } from './romanizer.js';
 import { parseTtml } from './ttmlParser.js';
 
+export const MAX_CACHE_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
 export class LyricsProvider {
     constructor(params = {}) {
         let session = null;
@@ -29,7 +31,7 @@ export class LyricsProvider {
         }
 
         this._session = session || new Soup.Session({
-            user_agent: 'SpotifyFloatingLyrics/1.0 (GNOME Shell Extension)',
+            user_agent: 'Spicie/2.0 (GNOME Shell Extension)',
             timeout: 10,
         });
 
@@ -44,13 +46,48 @@ export class LyricsProvider {
             try {
                 const baseCache = cacheDir || GLib.get_user_cache_dir();
                 this._cacheDirPath = GLib.build_filenamev([baseCache, 'spotify-floating-lyrics']);
-                GLib.mkdir_with_parents(this._cacheDirPath, 0o755);
+                GLib.mkdir_with_parents(this._cacheDirPath, 0o700);
             } catch (e) {
                 this._cacheDirPath = null;
             }
         } else {
             this._cacheDirPath = null;
         }
+        this._purgeExpiredCache();
+        if (this._cacheDirPath) this._cacheCleanupId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 3600, () => {
+            this._purgeExpiredCache();
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _isFresh(result) {
+        const now = Date.now();
+        return Number.isFinite(result?.cachedAt) && Number.isFinite(result?.expiresAt) &&
+            result.cachedAt <= now && result.expiresAt > now &&
+            result.expiresAt <= result.cachedAt + MAX_CACHE_AGE_MS;
+    }
+
+    _purgeExpiredCache() {
+        for (const [key, result] of this._cache) {
+            if (!this._isFresh(result)) this._cache.delete(key);
+        }
+        if (!this._cacheDirPath) return;
+        let files;
+        try {
+            const dir = Gio.File.new_for_path(this._cacheDirPath);
+            files = dir.enumerate_children('standard::name,standard::type', Gio.FileQueryInfoFlags.NONE, null);
+            let info;
+            while ((info = files.next_file(null))) {
+                if (!/^[a-f0-9]{40}\.json$/.test(info.get_name()) || info.get_file_type() !== Gio.FileType.REGULAR) continue;
+                const file = dir.get_child(info.get_name());
+                try {
+                    const [ok, bytes] = file.load_contents(null);
+                    const result = ok ? JSON.parse(new TextDecoder().decode(bytes)) : null;
+                    if (!this._isFresh(result)) file.delete(null);
+                } catch (_) { try { file.delete(null); } catch (_) {} }
+            }
+        } catch (_) {}
+        finally { files?.close(null); }
     }
 
     setEnableRomanization(enable) {
@@ -97,7 +134,7 @@ export class LyricsProvider {
                     return;
                 }
 
-                message.request_headers.append('User-Agent', 'SpotifyFloatingLyrics/1.0 (GNOME Shell Extension)');
+                message.request_headers.append('User-Agent', 'Spicie/2.0 (GNOME Shell Extension)');
                 message.request_headers.append('Accept', 'application/json, text/plain, */*');
                 if (options.headers) {
                     for (const [k, v] of Object.entries(options.headers)) {
@@ -180,12 +217,14 @@ export class LyricsProvider {
         const isSpicyCandidate = enableSpicy && Boolean(spicyToken) && Boolean(cleanTrackId);
 
         // 1. In-memory Cache Check
-        const cacheKey = `timing-v2:${isSpicyCandidate ? 'word' : 'line'}:${enableRom}:${safeArtist.toLowerCase()}:${safeTitle.toLowerCase()}:${safeAlbum.toLowerCase()}:${durationSec}:${cleanTrackId}`;
+        const credentialId = isSpicyCandidate ? GLib.compute_checksum_for_string(GLib.ChecksumType.SHA256, spicyToken, -1) : '';
+        const cacheKey = `vocals-v5:${credentialId}:${isSpicyCandidate ? 'word' : 'line'}:${enableRom}:${safeArtist.toLowerCase()}:${safeTitle.toLowerCase()}:${safeAlbum.toLowerCase()}:${durationSec}:${cleanTrackId}`;
         if (this._cache.has(cacheKey)) {
             const memResult = this._cache.get(cacheKey);
-            if (!isSpicyCandidate || memResult.provider === 'spicy_lyrics') {
+            if (this._isFresh(memResult) && (!isSpicyCandidate || memResult.provider === 'spicy_lyrics')) {
                 return memResult;
             }
+            this._cache.delete(cacheKey);
         }
 
         // 2. Disk Cache Check
@@ -267,7 +306,8 @@ export class LyricsProvider {
                     const startTimeMs = Number(span.StartTime) * 1000;
                     const endTimeMs = Number(span.EndTime) * 1000;
                     if (text && Number.isFinite(startTimeMs) && Number.isFinite(endTimeMs) && endTimeMs >= startTimeMs)
-                        syllables.push({ text, startTimeMs, endTimeMs, startOffset, endOffset: words.length });
+                        syllables.push({ text, startTimeMs, endTimeMs, startOffset, endOffset: words.length,
+                            isPartOfWord: typeof span.IsPartOfWord === 'boolean' ? span.IsPartOfWord : null });
                     if (i < input.length - 1 && !span.IsPartOfWord && !/\s$/.test(words) && !/^\s/.test(String(input[i + 1].Text || ''))) words += ' ';
                 });
                 if (!input.length) words = String(vocal.Text || item.Text || '');
@@ -275,13 +315,16 @@ export class LyricsProvider {
                 const endTimeMs = Number(vocal.EndTime ?? item.EndTime) * 1000;
                 if (!words || !Number.isFinite(startTimeMs) || !Number.isFinite(endTimeMs) || endTimeMs <= startTimeMs) continue;
                 lines.push({ id: lines.length, timeMs: startTimeMs, startTimeMs, endTimeMs, words, text: words,
+                    oppositeAligned: typeof item.OppositeAligned === 'boolean' ? item.OppositeAligned : null,
                     syllables: syllables.length ? syllables : null, timing: syllables.length ? 'syllable' : 'line',
                     isInterlude: false, romanized: enableRom ? vocal.TransliteratedText || null : null });
             }
             lines.sort((a, b) => a.timeMs - b.timeMs);
             this._attachRomanization(lines, enableRom);
         }
-        return { provider: 'spicy_lyrics', source: data.Body?.source || 'spicy_lyrics',
+        const body = data.Body || data;
+        return { provider: 'spicy_lyrics', source: body.source || null,
+            uploadAttribution: body.UploadAttribution || null,
             instrumental: false, syncedLyrics: null, plainLyrics: null, lines };
     }
 
@@ -469,7 +512,9 @@ export class LyricsProvider {
                 const [ok, contents] = GLib.file_get_contents(path);
                 if (ok && contents) {
                     const decoder = new TextDecoder('utf-8');
-                    return JSON.parse(decoder.decode(contents));
+                    const result = JSON.parse(decoder.decode(contents));
+                    if (this._isFresh(result)) return result;
+                    Gio.File.new_for_path(path).delete(null);
                 }
             }
         } catch (e) {
@@ -479,7 +524,13 @@ export class LyricsProvider {
     }
 
     _writeDiskCache(key, data) {
-        if (!this._cacheDirPath || !data) return;
+        if (!data) return;
+        if (!data.cachedAt) {
+            data.cachedAt = Date.now();
+            // Leave a day for periodic cleanup while keeping the service's 30-day cap.
+            data.expiresAt = data.cachedAt + MAX_CACHE_AGE_MS - 24 * 60 * 60 * 1000;
+        }
+        if (!this._cacheDirPath) return;
         try {
             const hash = GLib.compute_checksum_for_string(GLib.ChecksumType.SHA1, key, -1);
             const path = GLib.build_filenamev([this._cacheDirPath, `${hash}.json`]);
@@ -502,6 +553,8 @@ export class LyricsProvider {
 
     destroy() {
         this._destroyed = true;
+        if (this._cacheCleanupId) GLib.Source.remove(this._cacheCleanupId);
+        this._cacheCleanupId = 0;
         this.cancel();
         this.clearCache();
         this._session = null;

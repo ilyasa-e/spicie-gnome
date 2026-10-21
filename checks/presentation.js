@@ -1,0 +1,47 @@
+import GLib from 'gi://GLib';
+import Cairo from 'cairo';
+import System from 'system';
+import { floatingPosition, lineAlignment, activeVocalLines } from '../lyricsPresentation.js';
+import { activeLineIndex } from '../karaokeTiming.js';
+import { LyricsProvider } from '../lyricsProvider.js';
+import { LyricsSync } from '../lyricsSync.js';
+import { KaraokeLayout } from '../karaokeLayout.js';
+let count=0,failed=false;
+const check=(name,value)=>{if(!value)throw Error(name);print(`PASS ${name}`);count++;};
+const loop=new GLib.MainLoop(null,false);
+(async()=>{
+    const area={x:100,y:32,width:1000,height:700};
+    const top=floatingPosition(area,400,150,'top-center');
+    check('Top center uses the work area below the panel',top.x===400&&top.y===56);
+    check('Top left keeps a screen margin',floatingPosition(area,400,150,'top-left').x===124);
+    check('Top right keeps a screen margin',floatingPosition(area,400,150,'top-right').x===676);
+    check('Bottom center remains centered after height changes',floatingPosition(area,400,230,'bottom-center').y===478);
+    const custom=floatingPosition(area,400,150,'custom',-1000,2000);
+    check('Custom positions are clamped to the screen',custom.x===100&&custom.y===582);
+    check('Oversized windows do not get negative coordinates',floatingPosition(area,2000,1000,'top-center').x===100);
+    check('Ordinary lyrics fall back to centered text',lineAlignment('vocals',{})==='center');
+    check('First vocalist follows source to the left',lineAlignment('vocals',{oppositeAligned:false})==='left');
+    check('Second vocalist follows source to the right',lineAlignment('vocals',{oppositeAligned:true})==='right');
+    check('Manual alignment overrides vocalist positions',lineAlignment('left',{oppositeAligned:true})==='left');
+    const provider=new LyricsProvider({session:{sendAsync:async()=>({status:200,body:{Body:{source:'apple_music',Content:[
+        {Type:'Vocal',Text:'First voice',StartTime:1,EndTime:5,OppositeAligned:false},
+        {Type:'Vocal',Text:'Second voice',StartTime:2,EndTime:3,OppositeAligned:true}]}}})}});
+    const result=await provider.fetchLyrics('Song','Artist','Album',10,'1234567890123456789012',{enableSpicy:true,spicyToken:'test-credential'});
+    check('Both vocalist flags survive source decoding',result.lines[0].oppositeAligned===false&&result.lines[1].oppositeAligned===true);
+    const sync=new LyricsSync(result.lines);
+    check('Vocalist flags survive synchronization',sync.getLines()[1].oppositeAligned===true);
+    check('Overlapping lead vocals remain visible together',activeVocalLines(sync.getLines(),2500).length===2);
+    check('Earlier vocal continues after shorter overlap ends',activeLineIndex(sync.getLines(),3500)===0);
+    check('Completed vocals disappear',activeVocalLines(sync.getLines(),6000).length===0);
+    const surface=new Cairo.ImageSurface(Cairo.Format.ARGB32,400,100),cr=new Cairo.Context(surface);
+    const line={words:'Test',syllables:[{text:'Test',startTimeMs:0,endTimeMs:1000}]};
+    const left=new KaraokeLayout(cr,line,'Sans 20',350,'left');
+    const center=new KaraokeLayout(cr,line,'Sans 20',350,'center');
+    const right=new KaraokeLayout(cr,line,'Sans 20',350,'right');
+    check('Highlight geometry follows centered text',center.characters[0].x>left.characters[0].x);
+    check('Highlight geometry follows right-aligned text',right.characters[0].x>center.characters[0].x);
+    check('Wrapped right-aligned glyphs stay inside the available width',right.characters.every(char=>char.x+Math.abs(char.width)<=350));
+    cr.$dispose();sync.destroy();provider.destroy();
+    print(`${count} presentation checks passed`);
+})().catch(error=>{failed=true;printerr(error.stack);}).finally(()=>loop.quit());
+loop.run();if(failed)System.exit(1);

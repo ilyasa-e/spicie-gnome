@@ -9,7 +9,8 @@ import { LyricsProvider } from './lyricsProvider.js';
 import { LyricsSync } from './lyricsSync.js';
 import { SpotifyIndicator } from './indicator.js';
 import { SpotifyLyricsPopup } from './popupMenu.js';
-import { DesktopFloatingHUD } from './floatingOverlay.js';
+import { lyricAttribution } from './lyricsAttribution.js';
+import { floatingPosition, isLyricsWindow, hideLyricsWindowFromLists } from './lyricsPresentation.js';
 
 export default class SpotifyFloatingLyricsExtension extends Extension {
     enable() {
@@ -22,8 +23,10 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
 
         // 2. Standalone Smooth HUD Process & Window State
         this._hudSubprocess = null;
+        this._hudWaylandClient = null;
         this._hudStdinStream = null;
         this._hudWindowSignals = [];
+        this._hudWindows = new Set();
         this._windowCreatedSignalId = 0;
 
         // 3. UI Presenters
@@ -32,7 +35,9 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             () => this._toggleFloating(),
             () => this.openPreferences()
         );
-        Main.panel.addToStatusArea(this.uuid, this._indicator);
+        Main.panel.addToStatusArea(this.uuid, this._indicator, 0, this._settings.get_string('panel-position'));
+        this._positionIndicator();
+        this._indicator.visible = this._mpris.isAvailable;
 
         this._popup = new SpotifyLyricsPopup(
             this._indicator.menu,
@@ -41,25 +46,30 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             () => this.openPreferences()
         );
 
-        this._floatingHUD = new DesktopFloatingHUD(this._settings);
+
 
         // 4. Connect Sync Engine to UI Presenters
         this._syncSignalId = this._sync.connect('line-changed', (_emitter, index, line) => {
             const lineText = line ? (line.words || line.text || '').trim() : '';
             this._indicator.updateLyric(lineText);
-            this._floatingHUD.updateLine(line, index, this._sync.getLines());
             this._popup.setActiveLine(index);
         });
 
         // 5. Connect Settings changes for HUD Lifecycle
         this._settingsSignals = [];
-        const hudKeys = ['show-floating', 'hud-renderer'];
+        const hudKeys = ['show-floating'];
         hudKeys.forEach(k => {
             const sid = this._settings.connect(`changed::${k}`, () => {
                 this._syncHUDLifecycle();
             });
             this._settingsSignals.push(sid);
         });
+        this._settingsSignals.push(this._settings.connect('changed::panel-position', () => this._positionIndicator()));
+        for (const key of ['floating-position', 'floating-x', 'floating-y', 'floating-always-on-top']) {
+            this._settingsSignals.push(this._settings.connect(`changed::${key}`, () => {
+                for (const window of this._hudWindows) this._applyHUDPosition(window);
+            }));
+        }
         for (const key of ['enable-spicy-lyrics', 'spicy-lyrics-token', 'enable-romanization']) {
             this._settingsSignals.push(this._settings.connect(`changed::${key}`, () => {
                 this._onTrackChanged(this._mpris.track);
@@ -115,12 +125,15 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
 
         // Player Available
         const availSig = this._mpris.connect('player-available', (_mpris, isAvailable) => {
+            this._indicator.visible = isAvailable;
+            this._popup.setAvailable(isAvailable);
+            this._syncHUDLifecycle();
             if (!isAvailable) {
+                this._setLyricsAttribution(null);
                 this._indicator.updateLyric('');
                 this._indicator.updatePlayback(false, null);
                 this._popup.updateMetadata(null, false);
                 this._popup.setLyrics([]);
-                this._floatingHUD.updateLine(null, -1, []);
                 this._sync.setLyrics([]);
                 this._sendHUDMessage({
                     type: 'lyrics',
@@ -139,6 +152,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._mprisSignals.push(availSig);
 
         // Synchronize HUD process with current settings
+        this._popup.setAvailable(this._mpris.isAvailable);
         this._syncHUDLifecycle();
 
         // Check if Spotify is already running & playing right now
@@ -159,9 +173,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         if (!this._settings) return;
 
         const showFloating = this._settings.get_boolean('show-floating');
-        const renderer = this._settings.get_string('hud-renderer');
-
-        if (showFloating && renderer === 'smooth-gtk') {
+        if (showFloating && this._mpris?.isAvailable) {
             this._ensureHUDProcess();
         } else {
             this._stopHUDProcess();
@@ -181,7 +193,20 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
                 flags: Gio.SubprocessFlags.STDIN_PIPE,
             });
 
-            this._hudSubprocess = launcher.spawnv([exePath]);
+            // GNOME 50 removed the X11 compositor and this detection function.
+            if (!Meta.is_wayland_compositor || Meta.is_wayland_compositor()) {
+                // A managed Wayland client also supports hiding the window on
+                // older GNOME versions. Do not inherit an X11 backend override.
+                launcher.setenv('GDK_BACKEND', 'wayland', true);
+                if (Meta.WaylandClient.new_subprocess) {
+                    this._hudWaylandClient = Meta.WaylandClient.new_subprocess(global.context, launcher, [exePath]);
+                    this._hudSubprocess = this._hudWaylandClient.get_subprocess();
+                } else {
+                    this._hudWaylandClient = Meta.WaylandClient.new(global.context, launcher);
+                    this._hudSubprocess = this._hudWaylandClient.spawnv(global.display, [exePath]);
+                }
+            } else this._hudSubprocess = launcher.spawnv([exePath]);
+            launcher.close();
             this._hudStdinStream = this._hudSubprocess.get_stdin_pipe();
 
             this._hudSubprocess.wait_check_async(null, (_proc, res) => {
@@ -193,6 +218,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
                 if (this._hudSubprocess === _proc) {
                     this._hudSubprocess = null;
                     this._hudStdinStream = null;
+                    this._hudWaylandClient = null;
                 }
             });
 
@@ -204,7 +230,9 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
                     type: 'lyrics',
                     title: track.title || '',
                     artist: track.artist || '',
-                    lines
+                    lines,
+                    attribution: this._lyricsAttribution,
+                    expiresAt: this._lyricsExpiresAt,
                 });
             }
 
@@ -216,6 +244,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
                 positionMs: pos
             });
         } catch (e) {
+            this._hudWaylandClient = null;
             console.error('[SpotifyFloatingLyrics] Failed to spawn HUD process:', e);
         }
     }
@@ -235,6 +264,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             } catch (e) {}
             this._hudSubprocess = null;
         }
+        this._hudWaylandClient = null;
     }
 
     _sendHUDMessage(msg) {
@@ -253,64 +283,86 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         if (!global.display) return;
 
         this._windowCreatedSignalId = global.display.connect('window-created', (_disp, metaWindow) => {
-            this._configureHUDMetaWindow(metaWindow);
+            this._watchHUDWindow(metaWindow);
         });
+
+        this._hudGrabSignals = [
+            global.display.connect('grab-op-begin', (_display, window, op) => {
+                if (this._hudWindows.has(window) && [Meta.GrabOp.MOVING, Meta.GrabOp.KEYBOARD_MOVING].includes(op)) this._hudDragging = window;
+            }),
+            global.display.connect('grab-op-end', (_display, window) => {
+                if (this._hudDragging !== window || !this._settings) return;
+                this._hudDragging = null;
+                const rect = window.get_frame_rect();
+                this._savingHUDPosition = true;
+                this._settings.set_int('floating-x', rect.x);
+                this._settings.set_int('floating-y', rect.y);
+                this._settings.set_string('floating-position', 'custom');
+                this._savingHUDPosition = false;
+            }),
+        ];
+
+        this._hudPendingWindows = new Map();
 
         // Scan existing windows
         try {
-            const tabList = global.display.get_tab_list ? global.display.get_tab_list(Meta.TabList.NORMAL, null) : [];
-            for (const mw of tabList) {
-                this._configureHUDMetaWindow(mw);
+            // Hidden overlays are deliberately absent from the tab list.
+            for (const actor of global.get_window_actors()) {
+                const mw = actor.meta_window;
+                this._watchHUDWindow(mw);
             }
         } catch (e) {}
+    }
+
+    _watchHUDWindow(window) {
+        this._configureHUDMetaWindow(window);
+        if (this._hudWindows.has(window)) return;
+        const clear = () => {
+            const ids = this._hudPendingWindows.get(window);
+            if (!ids) return;
+            this._hudPendingWindows.delete(window);
+            for (const id of ids) { try { window.disconnect(id); } catch (_) {} }
+        };
+        const notify = window.connect('notify', () => {
+            this._configureHUDMetaWindow(window);
+            if (this._hudWindows.has(window)) clear();
+        });
+        const unmanaged = window.connect('unmanaged', clear);
+        this._hudPendingWindows.set(window, [notify, unmanaged]);
     }
 
     _configureHUDMetaWindow(metaWindow) {
         if (!metaWindow) return;
 
         try {
-            const title = typeof metaWindow.get_title === 'function' ? metaWindow.get_title() : '';
-            const wmClass = typeof metaWindow.get_wm_class === 'function' ? metaWindow.get_wm_class() : '';
-            const appId = typeof metaWindow.get_gtk_application_id === 'function' ? metaWindow.get_gtk_application_id() : '';
+            if (isLyricsWindow(metaWindow)) {
 
-            if (title === 'Spicie' || title === 'Spicy Lyra Lyrics' || title === 'Spotify Floating Lyrics' ||
-                wmClass === 'dev.norang.SpotifyFloatingLyricsHUD' ||
-                appId === 'dev.norang.SpotifyFloatingLyricsHUD') {
-
-                // Pin Always on Top & Stick across workspaces
-                if (typeof metaWindow.make_above === 'function') {
-                    metaWindow.make_above();
-                }
-                if (typeof metaWindow.stick === 'function') {
-                    metaWindow.stick();
-                }
-                if (typeof metaWindow.set_skip_taskbar === 'function') {
-                    metaWindow.set_skip_taskbar(true);
-                }
-
-                // Restore custom position if saved
-                const posMode = this._settings.get_string('floating-position');
-                if (posMode === 'custom' && typeof metaWindow.move_frame === 'function') {
-                    const x = this._settings.get_int('floating-x');
-                    const y = this._settings.get_int('floating-y');
-                    metaWindow.move_frame(true, x, y);
-                }
-
-                // Save custom coordinates when moved by user
-                const posId = metaWindow.connect('position-changed', () => {
-                    if (!this._settings || typeof metaWindow.get_frame_rect !== 'function') return;
-                    const rect = metaWindow.get_frame_rect();
-                    if (rect) {
-                        this._settings.set_string('floating-position', 'custom');
-                        this._settings.set_int('floating-x', rect.x);
-                        this._settings.set_int('floating-y', rect.y);
-                    }
-                });
-                this._hudWindowSignals.push({ window: metaWindow, id: posId });
+                if (this._hudWindows.has(metaWindow)) return;
+                this._hudWindows.add(metaWindow);
+                metaWindow.stick?.();
+                hideLyricsWindowFromLists(metaWindow, this._hudWaylandClient);
+                const resizeId = metaWindow.connect('size-changed', () => this._applyHUDPosition(metaWindow));
+                const unmanagedId = metaWindow.connect('unmanaged', () => this._hudWindows.delete(metaWindow));
+                this._hudWindowSignals.push({ window: metaWindow, id: resizeId }, { window: metaWindow, id: unmanagedId });
+                this._applyHUDPosition(metaWindow);
             }
         } catch (e) {
             console.error('[SpotifyFloatingLyrics] MetaWindow configuration error:', e);
         }
+    }
+
+    _applyHUDPosition(window) {
+        if (!this._settings || this._hudDragging === window || this._savingHUDPosition) return;
+        if (this._settings.get_boolean('floating-always-on-top')) window.make_above?.();
+        else window.unmake_above?.();
+        const monitor = window.get_monitor();
+        if (monitor < 0) return;
+        const area = Main.layoutManager.getWorkAreaForMonitor(monitor);
+        const rect = window.get_frame_rect();
+        if (!rect.width || !rect.height) return;
+        const position = floatingPosition(area, rect.width, rect.height,
+            this._settings.get_string('floating-position'), this._settings.get_int('floating-x'), this._settings.get_int('floating-y'));
+        if (rect.x !== position.x || rect.y !== position.y) window.move_frame(false, position.x, position.y);
     }
 
     _startPositionTicker() {
@@ -348,9 +400,9 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
     async _onTrackChanged(track) {
         const requestId = (this._lyricsRequestId || 0) + 1;
         this._lyricsRequestId = requestId;
+        this._setLyricsAttribution(null);
         if (!track || !track.title) {
             this._indicator.updateLyric('');
-            this._floatingHUD.updateLine(null, -1, []);
             this._popup.setLyrics([]);
             this._sync.setLyrics([]);
             this._sendHUDMessage({
@@ -370,7 +422,6 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._sync.setLyrics([]);
         this._popup.setLyrics([]);
         this._indicator.updateLyric('');
-        this._floatingHUD.updateLine(null, -1, []);
         this._sendHUDMessage({ type: 'lyrics', title: track.title || '', artist: track.artist || '', lines: [] });
 
         const enableSpicy = this._settings.get_boolean('enable-spicy-lyrics');
@@ -398,6 +449,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             const nowTrack = this._mpris.track;
             if (requestId === this._lyricsRequestId && nowTrack && nowTrack.title === title) {
                 if (res && Array.isArray(res.lines) && res.lines.length > 0) {
+                    this._setLyricsAttribution(res);
                     this._sync.setLyrics(res.lines);
                     this._popup.setLyrics(res.lines);
 
@@ -406,7 +458,9 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
                         type: 'lyrics',
                         title,
                         artist,
-                        lines: res.lines
+                        lines: res.lines,
+                        attribution: this._lyricsAttribution,
+                        expiresAt: this._lyricsExpiresAt,
                     });
 
                     const pos = this._mpris.getPositionMs();
@@ -433,6 +487,31 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         }
     }
 
+    _setLyricsAttribution(result) {
+        if (this._lyricsExpiryId) GLib.Source.remove(this._lyricsExpiryId);
+        this._lyricsExpiryId = 0;
+        this._lyricsAttribution = lyricAttribution(result);
+        this._lyricsExpiresAt = result?.expiresAt || null;
+        this._indicator?.setAttribution(this._lyricsAttribution);
+        this._popup?.setAttribution(this._lyricsAttribution);
+        if (this._lyricsExpiresAt) this._lyricsExpiryId = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
+            Math.max(1, Math.min(4294967295, this._lyricsExpiresAt - Date.now())), () => {
+                this._lyricsExpiryId = 0;
+                this._onTrackChanged(this._mpris?.track);
+                return GLib.SOURCE_REMOVE;
+            });
+    }
+
+    _positionIndicator() {
+        const actor = this._indicator.container;
+        const left = this._settings.get_string('panel-position') === 'left';
+        const box = left ? Main.panel._leftBox : Main.panel._rightBox;
+        actor.get_parent()?.remove_child(actor);
+        const workspace = Main.panel.statusArea.activities?.container;
+        const workspaceIndex = box.get_children().indexOf(workspace);
+        box.insert_child_at_index(actor, left ? (workspaceIndex >= 0 ? workspaceIndex + 1 : -1) : 0);
+    }
+
     _toggleFloating() {
         if (this._settings) {
             const current = this._settings.get_boolean('show-floating');
@@ -442,9 +521,17 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
 
     disable() {
         this._lyricsRequestId = (this._lyricsRequestId || 0) + 1;
+        this._setLyricsAttribution(null);
         this._stopPositionTicker();
         this._stopHUDProcess();
 
+        for (const id of this._hudGrabSignals || []) global.display.disconnect(id);
+        this._hudGrabSignals = [];
+        this._hudWindows.clear();
+        for (const [window, ids] of this._hudPendingWindows || []) {
+            for (const id of ids) { try { window.disconnect(id); } catch (_) {} }
+        }
+        this._hudPendingWindows?.clear();
         if (this._windowCreatedSignalId && global.display) {
             global.display.disconnect(this._windowCreatedSignalId);
             this._windowCreatedSignalId = 0;
@@ -479,10 +566,6 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         }
 
         // Clean up UI presenters
-        if (this._floatingHUD) {
-            this._floatingHUD.destroy();
-            this._floatingHUD = null;
-        }
 
         if (this._popup) {
             this._popup.destroy();
