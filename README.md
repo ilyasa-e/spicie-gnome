@@ -13,9 +13,27 @@ Both layouts include the album cover, previous/play/pause/next controls, a seek 
 
 Use the pin button or **Keep player on desktop** to keep the player visible. Drag its cover, title, or empty background to move it. The position is saved separately from desktop lyrics. **Player position → Reset** moves it back to the starting position. Fullscreen apps hide the pinned player.
 
+**Player size** scales the entire player from 70% to 150%, including text,
+controls, spacing, and its lyric panel. It changes the actual layout size, so
+buttons and dragging continue to match their visible positions.
+
+In **Settings → Player → Player lyrics**, enable **Show lyrics** for Horizontal
+and choose one to eight **Visible lyric lines**. A player near the top places
+lyrics below it; a player near the bottom places lyrics above it. Scroll freely
+and click **Follow song** to return to the current line. When lyrics are off,
+source credits sit below the song controls and above the footer buttons.
+Compact always uses this credit placement.
+
 ## Lyrics
 
-Lyrics can appear in the top bar, on the desktop, inside the player, or in multiple locations. The top-bar indicator and pinned player appear only while Spotify is available. Choose Left or Right with **Top bar position**. Left places the indicator after the workspace indicator. The top-bar line stays visible between phrases and is cleared when seeking before the first lyric or switching songs. Enable **Player lyrics** to show the current line inside the popup and pinned player.
+Lyrics can appear in the top bar, on the desktop, inside the player, or in multiple locations. The top-bar indicator and pinned player appear only while Spotify is available. Choose Left or Right with **Top bar position**. Left places the indicator after the workspace indicator. The top-bar line stays visible between phrases and is cleared when seeking before the first lyric or switching songs. Horizontal layout can show a separate scrolling lyric panel in the popup and pinned player. Compact always keeps lyrics out of the player.
+
+**Settings → Player → Top bar** has separate Artist, Song title, and Lyrics
+switches. Selected fields use ` | ` between them; empty or hidden fields leave
+no extra separators. Turning all three off keeps the playback button. The player
+shows source details when opened, even with Player lyrics off. The top bar
+shows only the selected song fields; source credits stay in the player and
+floating lyrics.
 
 Desktop lyrics use one lightweight window. **Animate lyrics** is the only animation option: it highlights characters when word timing is available and otherwise shows normal text.
 
@@ -30,7 +48,28 @@ The default screen position is **Top center**, below the top bar. Top left, Top 
 
 **Text alignment** is separate from screen position: choose Left, Center, Right, or **By vocalist**. By vocalist uses the source's `OppositeAligned` flag to place voices on the left or right, including overlapping lead vocals. Without that flag, text stays centered. Manual alignment applies to all voices. The same window handles normal and animated lyrics. Transparent draws no background.
 
-Turn on **Let clicks pass through** to interact with the app behind the lyrics. Use **Move desktop lyrics → Move** to turn click-through off and drag the lyrics again. Lyrics stay hidden until their first timed word begins.
+Turn on **Let clicks pass through** to interact with the app behind the lyrics. Use **Move desktop lyrics → Move** to turn click-through off and drag the lyrics again. The first lyric is visible while waiting, without early karaoke highlighting.
+
+**Settings → Lyrics → Visible lines** selects one to eight lyric lines (two by
+default). With two, the active lyric is first and the next line is below it.
+With three or more, one previous line sits above the active lyric in row two.
+The first lyric starts in row one. Other lines are dimmed, and simultaneous
+vocalists remain visible even if that exceeds the chosen context count.
+
+**Countdown dots** show three timed dots in long intros and vocal gaps. They
+cover the last four seconds of gaps at least 2.5 seconds long and disappear at
+the next lyric's exact start. Pause freezes them; seeking rebuilds their state.
+Turning Animate lyrics off removes their bounce while keeping the countdown.
+The countdown is a row in the lyric sequence, before the next vocal. The first
+lyric is already visible below it during an intro. Existing rows scroll smoothly
+when focus advances; seeking rebuilds the view immediately.
+
+Floating LRCLIB credits appear with the final lyric and remain at the end. For
+responses from the Spicy Lyrics API, including Apple Music, a small source line
+and any required contributor links remain visible whenever lyrics are shown.
+Community credits show uploader and maker names inline, with underlined links
+from the response. They wrap when space is limited; role labels and the Spicy
+Lyrics name are omitted from the credit display. Source metadata stays intact.
 
 **Animate lyrics** controls highlighting:
 
@@ -46,11 +85,18 @@ Timing precision depends on the source's segments and Spotify's reported playbac
 
 ## Sources
 
-LRCLIB supplies lyrics without sign-in. **Settings → Sources** also offers Spicy Lyrics for word timing, with a [Spicy Lyrics key](https://developers.spicylyrics.org/docs/keys). Spotify access tokens do not authenticate this service. The integration uses its current `/v1/lyrics/{trackId}` route and also understands catalogue TTML. The default source is used when the optional source is unavailable.
+Spicy Lyrics uses one endpoint. The service selects **community sync → Apple
+Music → Spotify**, considering timing precision and availability for the two
+commercial sources. Spicie keeps the returned source and community contributor
+links. It does not make a separate community request or force a commercial
+source. See the [source hierarchy](https://developers.spicylyrics.org/docs/sync-sources#the-hierarchy).
 
-Spicie is an independent app and is not made or endorsed by Spicy Lyrics. Source credits appear beside lyrics, including contributor links for community syncs. Saved lyrics expire within 30 days; expired or older unversioned cache files are discarded. Lyrics are only displayed inside the app and are not offered as downloads or a shared service.
 
-Keys are stored in your local GNOME settings and are never included in the repository. Do not bundle a secret key in a release. Apps distributed to other people must use client access; the [key guide](https://developers.spicylyrics.org/docs/keys) explains native clients and app templates. Access to the service does not grant permission from the song's rights holders; see the [terms](https://developers.spicylyrics.org/terms).
+LRCLIB supplies lyrics without sign-in. **Settings → Sources** also offers Spicy Lyrics for word timing, with a [Spicy Lyrics client key](https://developers.spicylyrics.org/docs/keys). Spotify access tokens and Spicy Lyrics secret keys do not belong in the extension. The integration uses its current `/v1/lyrics/{trackId}` route and also understands catalogue TTML. The default source is used when the optional source is unavailable.
+
+Spicie is an independent app and is not made or endorsed by Spicy Lyrics. Source credits appear in the player and floating lyrics, including contributor links for community syncs. LRCLIB credits appear in the player and at the end of desktop lyrics. Saved lyrics expire within 30 days; expired or older unversioned cache files are discarded. Lyrics are only displayed inside the app and are not offered as downloads or a shared service.
+
+Client keys are stored in local GNOME settings and are never included in the repository or release package. Do not bundle a secret key in a release. Apps distributed to other people should use an approved Spicy Lyrics app template so each user receives their own client key. Access to the service does not grant permission from the song's rights holders; see the [terms](https://developers.spicylyrics.org/terms).
 
 ## Install
 
@@ -80,6 +126,7 @@ GSETTINGS_BACKEND=memory gjs -m checks/sources.js
 GSETTINGS_BACKEND=memory gjs -m checks/presentation.js
 GSETTINGS_BACKEND=memory gjs -m checks/regressions.js
 GSETTINGS_BACKEND=memory gjs -m checks/syllables.js
+GSETTINGS_BACKEND=memory gjs -m checks/view.js
 ```
 
 The player checks cover artwork loading, cancellation when songs change, fallback colours, and time formatting. The player and settings also need a running GNOME session for visual and interaction checks.

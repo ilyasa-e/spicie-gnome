@@ -3,11 +3,10 @@
  */
 
 .lyrics-source-credits { font-size: 11px; color: rgba(255, 255, 255, 0.85); spacing: 0; margin-left: 10px; }
-.lyrics-source-link { color: #b4dcff; border-radius: 3px; }
+.lyrics-source-link { color: #b4dcff; border-radius: 3px; padding: 0; text-decoration: underline; }
 .lyrics-source-link:hover { text-decoration: underline; }
 .lyrics-source-link:focus { background-color: rgba(255, 255, 255, 0.15); }
 .spotify-floating-content .lyrics-source-credits { margin-top: 6px; margin-left: 0; }
-.panel-lyric-stack .lyrics-source-credits { margin-left: 4px; }
 
 /* ==========================================================================
    1. Top Bar Panel Button & Taskbar Lyric Label
@@ -165,7 +164,16 @@
 .compact .spotify-player-lyrics { font-size: 10px; padding: 4px; }
 .compact .spotify-player-lyrics:checked { background-color: rgba(255,255,255,0.1); }
 .compact .spotify-player-utility { width: 24px; height: 24px; }
-.compact .spotify-player-inline-lyrics { margin-top: 5px; font-size: 12px; }
 
-.spotify-player-inline-lyrics { margin-top: 8px; spacing: 4px; font-size: 13px; }
-.spotify-player-inline-lyrics .lyrics-source-credits { margin-left: 0; font-size: 10px; }
+.spotify-player-source-credits { margin-left: 0; margin-top: 6px; font-size: 10px; }
+
+.spotify-player-stack { spacing: 8px; }
+.spotify-lyrics-panel { padding: 12px; border-radius: 12px; spacing: 8px; }
+.spotify-lyrics-panel-header { font-size: 11px; }
+.spotify-lyrics-follow { border-radius: 4px; padding: 3px; }
+.spotify-lyrics-follow:hover, .spotify-lyrics-follow:checked { background-color: rgba(255,255,255,0.12); }
+.spotify-lyrics-follow:focus { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.65); }
+.spotify-lyrics-follow-content { spacing: 4px; }
+.spotify-lyrics-scroll StScrollBar { padding: 0 0 0 6px; }
+.spotify-lyrics-scroll StScrollBar StButton { background-color: rgba(255,255,255,0.25); border-radius: 3px; }
+.spotify-lyrics-scroll StScrollBar StButton:hover { background-color: rgba(255,255,255,0.5); }

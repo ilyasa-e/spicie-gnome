@@ -70,7 +70,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
                 for (const window of this._hudWindows) this._applyHUDPosition(window);
             }));
         }
-        for (const key of ['enable-spicy-lyrics', 'spicy-lyrics-token', 'enable-romanization']) {
+        for (const key of ['enable-spicy-lyrics', 'spicy-lyrics-client-key', 'enable-romanization']) {
             this._settingsSignals.push(this._settings.connect(`changed::${key}`, () => {
                 this._onTrackChanged(this._mpris.track);
             }));
@@ -425,7 +425,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._sendHUDMessage({ type: 'lyrics', title: track.title || '', artist: track.artist || '', lines: [] });
 
         const enableSpicy = this._settings.get_boolean('enable-spicy-lyrics');
-        const spicyToken = this._settings.get_string('spicy-lyrics-token');
+        const spicyClientKey = this._settings.get_string('spicy-lyrics-client-key');
         const enableRomaji = this._settings.get_boolean('enable-romanization');
         this._lyricsProvider.setEnableRomanization(enableRomaji);
 
@@ -442,7 +442,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
                 album,
                 durationSec,
                 trackId,
-                { enableSpicy, spicyToken }
+                { enableSpicy, spicyClientKey }
             );
 
             // Verify track hasn't changed while awaiting fetch
@@ -492,7 +492,6 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._lyricsExpiryId = 0;
         this._lyricsAttribution = lyricAttribution(result);
         this._lyricsExpiresAt = result?.expiresAt || null;
-        this._indicator?.setAttribution(this._lyricsAttribution);
         this._popup?.setAttribution(this._lyricsAttribution);
         if (this._lyricsExpiresAt) this._lyricsExpiryId = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
             Math.max(1, Math.min(4294967295, this._lyricsExpiresAt - Date.now())), () => {

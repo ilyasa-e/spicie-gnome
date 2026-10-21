@@ -1,9 +1,9 @@
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
-import GLib from 'gi://GLib';
+import Pango from 'gi://Pango';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
-import { SourceCredits } from './sourceCredits.js';
+import { panelText } from './lyricsView.js';
 
 export const SpotifyIndicator = GObject.registerClass(
 class SpotifyIndicator extends PanelMenu.Button {
@@ -34,43 +34,40 @@ class SpotifyIndicator extends PanelMenu.Button {
             text: '',
             style_class: 'panel-lyric-label',
             y_align: Clutter.ActorAlign.CENTER,
-            visible: this._settings ? this._settings.get_boolean('show-in-panel') : true,
+            visible: true,
         });
-        this._lyricBox = new St.BoxLayout({ vertical: true, y_align: Clutter.ActorAlign.CENTER,
+        this._lyricLabel.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+        this._lyricBox = new St.BoxLayout({ vertical: false, y_align: Clutter.ActorAlign.CENTER,
             style_class: 'panel-lyric-stack' });
         this._box.add_child(this._lyricBox);
         this._lyricBox.add_child(this._lyricLabel);
-        this._credits = new SourceCredits();
-        this._lyricBox.add_child(this._credits.actor);
-
         // Listen for GSettings changes on show-in-panel
         if (this._settings) {
-            this._settingsChangedId = this._settings.connect('changed::show-in-panel', () => {
-                this._lyricLabel.visible = this._settings.get_boolean('show-in-panel');
-                this._updateCreditsVisibility();
-            });
+            this._settingsChangedIds = ['show-in-panel', 'panel-show-artist', 'panel-show-title'].map(key =>
+                this._settings.connect(`changed::${key}`, () => this._updateText()));
         }
     }
 
     updateLyric(text) {
         if (!this._lyricLabel) return;
-        const cleanText = (text || '').trim();
-        this._lyricLabel.text = cleanText ? `  ${cleanText}` : '';
-        this._updateCreditsVisibility();
+        this._lyric = (text || '').trim();
+        this._updateText();
     }
 
-    setAttribution(attribution) {
-        this._attribution = attribution;
-        this._credits.setAttribution(attribution);
-        this._updateCreditsVisibility();
-    }
-
-    _updateCreditsVisibility() {
-        this._credits.actor.visible = Boolean(this._attribution && this._lyricLabel.visible && this._lyricLabel.text.trim());
+    _updateText() {
+        this._lyricLabel.text = panelText(this._track, this._lyric, {
+            artist: this._settings?.get_boolean('panel-show-artist') ?? false,
+            title: this._settings?.get_boolean('panel-show-title') ?? false,
+            lyrics: this._settings?.get_boolean('show-in-panel') ?? true,
+        });
+        this._lyricLabel.visible = Boolean(this._lyricLabel.text);
+        this._lyricBox.visible = this._lyricLabel.visible;
     }
 
     updatePlayback(isPlaying, track) {
         if (!this._icon) return;
+        this._track = track;
+        this._updateText();
         if (isPlaying) {
             this._icon.icon_name = 'media-playback-start-symbolic';
             this._icon.remove_style_pseudo_class('paused');
@@ -85,10 +82,7 @@ class SpotifyIndicator extends PanelMenu.Button {
     }
 
     destroy() {
-        if (this._settings && this._settingsChangedId) {
-            this._settings.disconnect(this._settingsChangedId);
-            this._settingsChangedId = null;
-        }
+        for (const id of this._settingsChangedIds || []) this._settings.disconnect(id);
         super.destroy();
     }
 });

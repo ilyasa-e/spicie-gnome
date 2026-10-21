@@ -20,7 +20,7 @@ export class SpotifyLyricsPopup {
             this._card.setArtwork(value);
             this._pinned?.setArtwork(value);
         });
-        this._signals = ['player-pinned', 'player-layout', 'player-x', 'player-y'].map(key =>
+        this._signals = ['player-pinned', 'player-layout', 'player-x', 'player-y', 'player-scale', 'show-player-lyrics', 'player-lyric-lines'].map(key =>
             settings.connect(`changed::${key}`, () => this._syncPinned()));
         this._monitorSignal = Main.layoutManager.connect('monitors-changed', () => this._positionPinned());
         this._syncPinned();
@@ -45,7 +45,11 @@ export class SpotifyLyricsPopup {
         if (!available) this._menu.close();
     }
 
-    setLyrics(lines) { this._lines = lines || []; this.setActiveLine(-1); }
+    setLyrics(lines) {
+        this._lines = lines || [];
+        this._card.setLyrics(this._lines);this._pinned?.setLyrics(this._lines);
+        this.setActiveLine(-1);
+    }
     setActiveLine(index) {
         this._lyric = this._lines?.[index]?.words || this._lines?.[index]?.text || '';
         this._card.setLyric(this._lyric);this._pinned?.setLyric(this._lyric);
@@ -56,6 +60,10 @@ export class SpotifyLyricsPopup {
     }
 
     _syncPinned() {
+        if (Main.layoutManager.primaryMonitor) {
+            const area = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+            this._card.setAvailableHeight(area.height - 24);
+        }
         if (!this._settings.get_boolean('player-pinned') || this._available === false) {
             this._finishDrag(false);
             if (this._pinned) {
@@ -69,6 +77,7 @@ export class SpotifyLyricsPopup {
             this._pinned = new PlayerCard(this._settings, this._mpris, this._openPrefs);
             this._pinned.setArtwork(this._artwork.value);
             this._pinned.updateMetadata(this._track, this._playing);
+            this._pinned.setLyrics(this._lines);
             this._pinned.setLyric(this._lyric);this._pinned.setAttribution(this._attribution);
             Main.layoutManager.addChrome(this._pinned.actor, { trackFullscreen: true });
             this._setupDrag();
@@ -78,11 +87,15 @@ export class SpotifyLyricsPopup {
     }
 
     _positionPinned() {
-        if (!this._pinned || this._dragging) return;
+        if (this._dragging) return;
         const monitor = Main.layoutManager.primaryMonitor;
         if (!monitor) return;
         const area = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+        this._card.setAvailableHeight(area.height - 24);
+        if (!this._pinned) return;
+        this._pinned.setAvailableHeight(area.height - 16);
         const actor = this._pinned.actor;
+        this._pinned.setLyricsAbove(this._settings.get_int('player-y') > area.y + area.height / 2);
         const width = actor.width || (this._settings.get_string('player-layout') === 'horizontal' ? 344 : 164);
         const height = actor.height || 180;
         const x = this._settings.get_int('player-x');
@@ -98,7 +111,7 @@ export class SpotifyLyricsPopup {
             const [x, y] = event.get_coords();
             let source = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
             while (source && source !== card.actor) {
-                if (source instanceof St.Button || source === card._slider) return Clutter.EVENT_PROPAGATE;
+                if (source instanceof St.Button || source === card._slider || source === card._lyricBox) return Clutter.EVENT_PROPAGATE;
                 source = source.get_parent();
             }
             this._dragOffset = [x - card.actor.x, y - card.actor.y];

@@ -15,12 +15,13 @@ import GioUnix from 'gi://GioUnix';
 import Cairo from 'cairo';
 import System from 'system';
 import { KaraokeLayout } from '../karaokeLayout.js';
-import { activeLineIndex } from '../karaokeTiming.js';
+import { activeLineIndex, lyricStartTime } from '../karaokeTiming.js';
 
 import { SpotifyMPRIS } from '../mpris.js';
 import { LyricsProvider } from '../lyricsProvider.js';
-import { lyricAttribution, attributionMarkup } from '../lyricsAttribution.js';
-import { lineAlignment, activeVocalLines } from '../lyricsPresentation.js';
+import { lyricAttribution, attributionMarkup, requiresVisibleAttribution } from '../lyricsAttribution.js';
+import { lineAlignment } from '../lyricsPresentation.js';
+import { floatingFrame, countdownDots, LyricRowMotion } from '../lyricsView.js';
 
 // Load X11 surface methods when available. Wayland-only GTK builds do not need
 // this namespace; the extension hides their windows through the compositor.
@@ -86,13 +87,15 @@ export class FloatingLyricsHUDApp {
                     'floating-click-passthrough',
                     'animate-lyrics',
                     'lyrics-alignment',
+                    'floating-line-count',
+                    'show-countdown',
                     'enable-spicy-lyrics',
-                    'spicy-lyrics-token'
+                    'spicy-lyrics-client-key'
                 ];
                 keys.forEach(k => {
                     this._settings.connect(`changed::${k}`, () => {
                         this._onSettingsChanged();
-                        if (['enable-spicy-lyrics', 'spicy-lyrics-token', 'enable-romanization'].includes(k) && !this._hasStdinLyrics && this._mpris) this._loadTrack(this._mpris.track);
+                        if (['enable-spicy-lyrics', 'spicy-lyrics-client-key', 'enable-romanization'].includes(k) && !this._hasStdinLyrics && this._mpris) this._loadTrack(this._mpris.track);
                     });
                 });
             }
@@ -129,7 +132,7 @@ export class FloatingLyricsHUDApp {
                 background-color: transparent;
                 background: transparent;
             }
-            .source-credits { color: rgba(255,255,255,0.85); font-size: 12px; }
+            .source-credits { color: rgba(255,255,255,0.8); font-size: 10px; }
             .source-credits link { color: #b4dcff; }
         `, -1);
         Gtk.StyleContext.add_provider_for_display(
@@ -147,12 +150,12 @@ export class FloatingLyricsHUDApp {
         // Use the display clock. Timing remains in milliseconds; repainting
         // follows the monitor refresh rather than a millisecond timer.
         this._drawingArea.add_tick_callback(() => {
-            const index = this._findActiveIndex(this._getCurrentPositionMs());
+            const frame = this._viewFrame(this._getCurrentPositionMs());
             const animate = this._settings?.get_boolean('animate-lyrics') ?? true;
-            const voices = activeVocalLines(this._lines, this._getCurrentPositionMs());
-            const signature = voices.map(line => line.id ?? line.timeMs).join(',');
-            const timed = voices.some(line => line.syllables?.length > 0);
-            if (signature !== this._lastVoices || index !== this._lastDrawnIndex || (animate && timed && this._playbackStatus === 'Playing'))
+            const timed = frame.rows.some(row => row.state === 'active' && row.line.syllables?.length);
+            if (this._frameSignature(frame) !== this._lastFrame ||
+                this._rowMotion?.running(GLib.get_monotonic_time() / 1000) ||
+                (this._playbackStatus === 'Playing' && ((animate && timed) || frame.filler)))
                 this._drawingArea.queue_draw();
             return true;
         });
@@ -255,6 +258,10 @@ export class FloatingLyricsHUDApp {
 
             switch (msg.type) {
                 case 'lyrics':
+                    this._rowMotion = null;
+                    this._motionGeometry = null;
+                    this._contentHeight = null;
+                    this._lastDrawPosition = null;
                     this._lines = Array.isArray(msg.lines) ? msg.lines : [];
                     this._setAttribution(this._lines.length ? msg.attribution || {provider:'Unknown source',contributors:[]} : null, msg.expiresAt);
                     this._trackTitle = msg.title || '';
@@ -328,7 +335,7 @@ export class FloatingLyricsHUDApp {
             const result = await this._lyricsProvider.fetchLyrics(track.title, track.artist || '', track.album || '',
                 Math.round((track.durationMs || 0) / 1000), track.trackId || '', {
                     enableSpicy: this._settings?.get_boolean('enable-spicy-lyrics') ?? false,
-                    spicyToken: this._settings?.get_string('spicy-lyrics-token') || '', enableRomanization,
+                    spicyClientKey: this._settings?.get_string('spicy-lyrics-client-key') || '', enableRomanization,
                 });
             if (generation !== this._requestGeneration || this._hasStdinLyrics) return;
             this._lines = result.lines || [];
@@ -365,6 +372,15 @@ export class FloatingLyricsHUDApp {
         return activeLineIndex(this._lines, posMs);
     }
 
+    _viewFrame(positionMs) {
+        return floatingFrame(this._lines, positionMs, this._settings?.get_int('floating-line-count') ?? 2,
+            this._settings?.get_boolean('show-countdown') ?? true);
+    }
+
+    _frameSignature(frame) {
+        return `${frame.rows.map(row => `${row.id}:${row.state}`).join(',')}:${frame.filler?.startTimeMs ?? ''}:${frame.finished}`;
+    }
+
     _render(cr, width, height) {
         // 1. Clear background transparently
         cr.save();
@@ -373,12 +389,11 @@ export class FloatingLyricsHUDApp {
         cr.restore();
 
         const currentPosMs = this._getCurrentPositionMs();
-        const activeIdx = this._findActiveIndex(currentPosMs);
-        const voices = activeVocalLines(this._lines, currentPosMs);
-        const activeLine = voices[0] || null;
-        this._lastVoices = voices.map(line => line.id ?? line.timeMs).join(',');
-        this._creditsLabel?.set_visible(Boolean(activeLine && this._attribution));
-        this._lastDrawnIndex = activeIdx;
+        const frame = this._viewFrame(currentPosMs);
+        this._lastFrame = this._frameSignature(frame);
+        const showCredits = Boolean(attributionMarkup(this._attribution) && (requiresVisibleAttribution(this._attribution)
+            ? frame.rows.length : frame.ending));
+        this._creditsLabel?.set_visible(showCredits);
 
         // Settings lookup with safe defaults
         const bgStyle = this._settings ? this._settings.get_string('background-style') : 'transparent';
@@ -387,31 +402,98 @@ export class FloatingLyricsHUDApp {
         const lineSpacing = this._settings ? this._settings.get_int('line-spacing') : 14;
         const enableRomaji = this._settings ? this._settings.get_boolean('enable-romanization') : true;
 
-        // 2. Draw Background Card / Pill
-        this._drawBackdrop(cr, width, height, bgStyle);
-
-        // 3. Render Content
-        const padX = 16;
-        let curY = 12;
-
-        if (!activeLine) {
+        if (!frame.rows.length && !frame.filler && !showCredits) {
+            this._rowMotion = null;
+            this._lastDrawPosition = null;
             this._queueHeight(40);
             return;
         }
 
-        for (const line of voices) {
-            const words = line.words || line.text || '';
+        // 2. Draw Background Card / Pill
+        this._drawBackdrop(cr, width, height, bgStyle);
+
+        const padX = 16;
+        const textWidth = Math.max(80, width - padX * 2);
+        let curY = 12;
+        const targets = frame.rows.map(row => {
+            const line = row.line;
             const alignment = lineAlignment(this._settings?.get_string('lyrics-alignment') || 'vocals', line);
-            curY += this._drawKaraokeLine(cr, line, words, currentPosMs, fontFamily, fontSize,
-                padX, curY, Math.max(80, width - padX * 2));
-            if (enableRomaji && line.romanized && line.romanized !== words) {
-                curY += 6 + this._drawTextLine(cr, line.romanized,
-                    `${fontFamily} Italic ${Math.max(12, Math.round(fontSize * 0.65))}`, padX, curY + 6,
-                    [1, 1, 1, 0.8], width - padX * 2, alignment);
+            let rowHeight;
+            if (row.kind === 'filler') rowHeight = Math.max(32, fontSize * 1.5);
+            else {
+                rowHeight = this._lineLayout(cr, line, fontFamily, fontSize, textWidth,
+                    row.state === 'active').drawing.height;
+                if (enableRomaji && line.romanized && line.romanized !== (line.words || line.text)) {
+                    const layout = this._textLayout(cr, line.romanized,
+                        `${fontFamily} Italic ${Math.max(12, Math.round(fontSize * 0.65))}`, textWidth, alignment);
+                    rowHeight += 6 + layout.get_pixel_size()[1];
+                }
             }
-            curY += Math.round(lineSpacing * 0.6);
+            const target = {id: row.id, row, y: curY, height: rowHeight,
+                opacity: row.state === 'active' || row.kind === 'filler' ? 1 : row.state === 'past' ? 0.45 : 0.4};
+            curY += rowHeight + Math.round(lineSpacing * 0.6);
+            return target;
+        });
+        const now = GLib.get_monotonic_time() / 1000;
+        this._rowMotion ||= new LyricRowMotion();
+        const snap = !this._lastDrawPosition || Math.abs(currentPosMs - this._lastDrawPosition) > 1500;
+        this._lastDrawPosition = currentPosMs;
+        const geometry = targets.map(item => `${item.id}:${item.y}:${item.height}`).join('|');
+        if (geometry !== this._motionGeometry) {
+            this._motionGeometry = geometry;
+            this._motionHeight = Math.max(this._contentHeight || curY, curY);
         }
-        this._queueHeight(curY + 10);
+        this._rowMotion.setRows(targets, now, snap);
+        this._contentHeight = this._rowMotion.running(now) ? this._motionHeight : curY;
+        const movingRows = this._rowMotion.sample(now);
+        cr.save();
+        // Old rows move out of the viewport rather than briefly replacing it.
+        cr.rectangle(0, 4, width, Math.max(curY, ...movingRows.map(item => item.y + item.height), 40));
+        cr.clip();
+        for (const item of movingRows) {
+            const {row, y, opacity} = item;
+            if (row.kind === 'filler') {
+                cr.pushGroup();
+                this._drawCountdown(cr, row, currentPosMs, width, y, fontSize);
+                cr.popGroupToSource();cr.paintWithAlpha(opacity);
+                continue;
+            }
+            const line = row.line;
+            const words = line.words || line.text || '';
+            cr.pushGroup();
+            const textHeight = this._drawKaraokeLine(cr, line, words, currentPosMs, fontFamily, fontSize,
+                padX, y, textWidth, row.state === 'active');
+            if (enableRomaji && line.romanized && line.romanized !== words)
+                this._drawTextLine(cr, line.romanized,
+                    `${fontFamily} Italic ${Math.max(12, Math.round(fontSize * 0.65))}`, padX, y + textHeight + 6,
+                    [1, 1, 1, 0.8], textWidth,
+                    lineAlignment(this._settings?.get_string('lyrics-alignment') || 'vocals', line));
+            cr.popGroupToSource(); cr.paintWithAlpha(opacity);
+        }
+        cr.restore();
+        // Keep the native window size stable while text scrolls. Resizing it
+        // on every animation frame makes some compositors flash a blank frame.
+        this._queueHeight(this._contentHeight + 10);
+    }
+
+    _drawCountdown(cr, filler, positionMs, width, y, fontSize = 22) {
+        const dots = countdownDots(filler, positionMs, this._settings?.get_boolean('animate-lyrics') ?? true);
+        const alignment = lineAlignment(this._settings?.get_string('lyrics-alignment') || 'vocals', filler.line);
+        const radius = Math.max(6, fontSize * 0.32);
+        const step = radius * 3;
+        const startX = alignment === 'left' ? 16 + radius : alignment === 'right' ? width - 16 - radius - step * 2 : width / 2 - step;
+        dots.forEach((dot, index) => {
+            const x = startX + index * step;
+            const centerY = y + radius * 2 + 4 - dot.lift * radius;
+            if (dot.lift > 0) {
+                const glow = new Cairo.RadialGradient(x, centerY, radius * 0.6, x, centerY, radius * 2);
+                glow.addColorStopRGBA(0, 1, 1, 1, dot.alpha * dot.lift * 0.35);
+                glow.addColorStopRGBA(1, 1, 1, 1, 0);
+                cr.setSource(glow);cr.newPath();cr.arc(x, centerY, radius * 2, 0, Math.PI * 2);cr.fill();
+            }
+            cr.newPath(); cr.arc(x, centerY, radius * (1 + dot.lift * 0.08), 0, Math.PI * 2);
+            cr.setSourceRGBA(1, 1, 1, dot.alpha); cr.fill();
+        });
     }
 
     _queueHeight(height) {
@@ -434,7 +516,7 @@ export class FloatingLyricsHUDApp {
         this._lyricsExpiryId = 0;
         this._attribution = attribution;
         this._creditsLabel?.set_markup(attributionMarkup(attribution));
-        this._creditsLabel?.set_visible(Boolean(attribution && this._lines.length));
+        this._creditsLabel?.set_visible(false);
         if (Number.isFinite(expiresAt)) this._lyricsExpiryId = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
             Math.max(1, Math.min(4294967295, expiresAt - Date.now())), () => {
                 this._lyricsExpiryId = 0;
@@ -464,8 +546,8 @@ export class FloatingLyricsHUDApp {
         cr.closePath();
     }
 
-    _drawKaraokeLine(cr, line, text, posMs, fontName, fontSize, x, y, width) {
-        const animate = this._settings?.get_boolean('animate-lyrics') ?? true;
+    _lineLayout(cr, line, fontName, fontSize, width, active) {
+        const animate = active && (this._settings?.get_boolean('animate-lyrics') ?? true);
         const alignment = lineAlignment(this._settings?.get_string?.('lyrics-alignment') || 'vocals', line);
         const key = `${fontName}:${fontSize}:${width}:${animate}:${alignment}`;
         this._karaokeLayouts ||= new Map();
@@ -475,25 +557,32 @@ export class FloatingLyricsHUDApp {
                 animate ? line : { ...line, syllables: null }, `${fontName} Bold ${fontSize}`, width, alignment) };
             this._karaokeLayouts.set(line, cache);
         }
-        this._karaokeCache = cache;
-        return this._karaokeCache.drawing.draw(cr, posMs, x, y);
+        return cache;
     }
 
-    _drawTextLine(cr, text, fontString, x, y, rgba, width = 524, alignment = 'center') {
+    _drawKaraokeLine(cr, line, text, posMs, fontName, fontSize, x, y, width, active = true) {
+        const cache = this._lineLayout(cr, line, fontName, fontSize, width, active);
+        if (active) this._karaokeCache = cache;
+        return cache.drawing.draw(cr, posMs, x, y);
+    }
+
+    _textLayout(cr, text, fontString, width, alignment) {
         const layout = PangoCairo.create_layout(cr);
-        const fontDesc = Pango.FontDescription.from_string(fontString);
-        layout.set_font_description(fontDesc);
+        layout.set_font_description(Pango.FontDescription.from_string(fontString));
         layout.set_text(text, -1);
         layout.set_width(Math.max(1, Math.floor(width)) * Pango.SCALE);
         layout.set_wrap(Pango.WrapMode.WORD_CHAR);
         layout.set_auto_dir(false);
         layout.set_alignment(({left:Pango.Alignment.LEFT,center:Pango.Alignment.CENTER,right:Pango.Alignment.RIGHT})[alignment]);
-        const [textW, textH] = layout.get_pixel_size();
+        return layout;
+    }
 
-        cr.setSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+    _drawTextLine(cr, text, fontString, x, y, rgba, width = 524, alignment = 'center') {
+        const layout = this._textLayout(cr, text, fontString, width, alignment);
+        cr.setSourceRGBA(...rgba);
         cr.moveTo(x, y);
         PangoCairo.show_layout(cr, layout);
-        return textH;
+        return layout.get_pixel_size()[1];
     }
 
     run(argv) {

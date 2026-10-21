@@ -14,6 +14,24 @@
       <default>'right'</default>
       <summary>Top bar position</summary>
     </key>
+    <key name="panel-show-artist" type="b">
+      <default>false</default>
+      <summary>Show artist in the top bar</summary>
+    </key>
+    <key name="panel-show-title" type="b">
+      <default>false</default>
+      <summary>Show song title in the top bar</summary>
+    </key>
+    <key name="floating-line-count" type="i">
+      <range min="1" max="8"/>
+      <default>2</default>
+      <summary>Number of desktop lyric lines</summary>
+      <description>Two lines place the active lyric first. Three or more place it second, with one previous line above it. The first lyric starts in the first row.</description>
+    </key>
+    <key name="show-countdown" type="b">
+      <default>true</default>
+      <summary>Show countdown dots before the next lyric</summary>
+    </key>
     <key name="show-player-lyrics" type="b">
       <default>false</default>
       <summary>Show lyrics in the player</summary>
@@ -116,10 +134,10 @@
       <description>Fetch enhanced syllable-synced lyrics from Spicy Lyrics API when available.</description>
     </key>
 
-    <key name="spicy-lyrics-token" type="s">
+    <key name="spicy-lyrics-client-key" type="s">
       <default>''</default>
-      <summary>Spicy Lyrics access key</summary>
-      <description>User-provided Spicy Lyrics key for fetching word timing.</description>
+      <summary>Spicy Lyrics client key</summary>
+      <description>User-provided client key for fetching word-timed lyrics.</description>
     </key>
 
     <key name="animate-lyrics" type="b">
@@ -142,6 +160,17 @@
       <default>'compact'</default>
       <summary>Player layout</summary>
       <description>Compact places playback controls below song details; Horizontal places them beside the details.</description>
+    </key>
+
+    <key name="player-scale" type="i">
+      <range min="70" max="150"/>
+      <default>100</default>
+      <summary>Overall player size as a percentage</summary>
+    </key>
+    <key name="player-lyric-lines" type="i">
+      <range min="1" max="8"/>
+      <default>4</default>
+      <summary>Number of visible lines in the horizontal player</summary>
     </key>
 
     <key name="player-pinned" type="b">

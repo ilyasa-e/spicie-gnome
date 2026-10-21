@@ -212,12 +212,12 @@ export class LyricsProvider {
         const cancellable = this._activeCancellable;
 
         const enableSpicy = Boolean(options.enableSpicy);
-        const spicyToken = options.spicyToken ? options.spicyToken.trim() : '';
+        const spicyClientKey = options.spicyClientKey ? options.spicyClientKey.trim() : '';
         const enableRom = options.enableRomanization !== undefined ? options.enableRomanization : this._enableRomanization;
-        const isSpicyCandidate = enableSpicy && Boolean(spicyToken) && Boolean(cleanTrackId);
+        const isSpicyCandidate = enableSpicy && /^sl_pk_/.test(spicyClientKey) && Boolean(cleanTrackId);
 
         // 1. In-memory Cache Check
-        const credentialId = isSpicyCandidate ? GLib.compute_checksum_for_string(GLib.ChecksumType.SHA256, spicyToken, -1) : '';
+        const credentialId = isSpicyCandidate ? GLib.compute_checksum_for_string(GLib.ChecksumType.SHA256, spicyClientKey, -1) : '';
         const cacheKey = `vocals-v5:${credentialId}:${isSpicyCandidate ? 'word' : 'line'}:${enableRom}:${safeArtist.toLowerCase()}:${safeTitle.toLowerCase()}:${safeAlbum.toLowerCase()}:${durationSec}:${cleanTrackId}`;
         if (this._cache.has(cacheKey)) {
             const memResult = this._cache.get(cacheKey);
@@ -238,9 +238,9 @@ export class LyricsProvider {
 
         try {
             // 3. Spicy Lyrics (Optional)
-            if (enableSpicy && spicyToken && cleanTrackId) {
+            if (isSpicyCandidate) {
                 try {
-                    const spicyResult = await this._fetchSpicyLyrics(cleanTrackId, spicyToken, cancellable, enableRom);
+                    const spicyResult = await this._fetchSpicyLyrics(cleanTrackId, spicyClientKey, cancellable, enableRom);
                     if (spicyResult && spicyResult.lines && spicyResult.lines.length > 0) {
                         this._cache.set(cacheKey, spicyResult);
                         this._writeDiskCache(cacheKey, spicyResult);
@@ -280,6 +280,8 @@ export class LyricsProvider {
     }
 
     async _fetchSpicyLyrics(trackId, token, cancellable, enableRom) {
+        // This endpoint resolves community → Apple Music → Spotify itself.
+        // Do not request commercial catalogues first or override Body.source.
         const url = `https://api.spicylyrics.org/v1/lyrics/${encodeURIComponent(trackId)}`;
         const res = await this._sendRequest(url, {
             headers: { Authorization: `Bearer ${token}` }, cancellable,

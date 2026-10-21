@@ -78,14 +78,14 @@ function digest(drawing, time, name) {
         return {status:200,body:{syncedLyrics:'[00:01.000]normal line'}};
     }};
     const provider = new LyricsProvider({session:network});
-    const wordResult = await provider.fetchLyrics('Test','Artist','Album',5,'1234567890123456789012',{enableSpicy:true,spicyToken:'test-key'});
+    const wordResult = await provider.fetchLyrics('Test','Artist','Album',5,'1234567890123456789012',{enableSpicy:true,spicyClientKey:'sl_pk_test-key'});
     check('Current source route used', calls[0].includes('/v1/lyrics/1234567890123456789012'));
     check('Source seconds converted to milliseconds', wordResult.lines[0].syllables[0].startTimeMs === 1000);
     check('Source word spacing is preserved', wordResult.lines[0].words === 'Wi go');
     const normalResult = await provider.fetchLyrics('Test','Artist','Album',5,'1234567890123456789012',{enableSpicy:false});
     check('Turning off extra source does not reuse word cache', normalResult.provider === 'lrclib' && !normalResult.lines[0].syllables);
     unauthorized = true;
-    const fallback = await provider.fetchLyrics('Other','Artist','Album',5,'2234567890123456789012',{enableSpicy:true,spicyToken:'invalid-key'});
+    const fallback = await provider.fetchLyrics('Other','Artist','Album',5,'2234567890123456789012',{enableSpicy:true,spicyClientKey:'invalid-key'});
     check('Source failure falls back to normal line timing', fallback.provider === 'lrclib' && characterTimeline(fallback.lines[0]) === null);
     provider.destroy(); sync.destroy();
 

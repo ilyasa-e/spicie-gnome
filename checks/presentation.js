@@ -26,7 +26,7 @@ const loop=new GLib.MainLoop(null,false);
     const provider=new LyricsProvider({session:{sendAsync:async()=>({status:200,body:{Body:{source:'apple_music',Content:[
         {Type:'Vocal',Text:'First voice',StartTime:1,EndTime:5,OppositeAligned:false},
         {Type:'Vocal',Text:'Second voice',StartTime:2,EndTime:3,OppositeAligned:true}]}}})}});
-    const result=await provider.fetchLyrics('Song','Artist','Album',10,'1234567890123456789012',{enableSpicy:true,spicyToken:'test-credential'});
+    const result=await provider.fetchLyrics('Song','Artist','Album',10,'1234567890123456789012',{enableSpicy:true,spicyClientKey:'sl_pk_test-credential'});
     check('Both vocalist flags survive source decoding',result.lines[0].oppositeAligned===false&&result.lines[1].oppositeAligned===true);
     const sync=new LyricsSync(result.lines);
     check('Vocalist flags survive synchronization',sync.getLines()[1].oppositeAligned===true);
