@@ -80,8 +80,15 @@ export class PlayerLyrics {
         this._followIcon.icon_size = Math.round(12 * scale);
         this._credits.actor.style = `font-size: ${10 * scale}px; margin-top: ${4 * scale}px;`;
         for (const {entry, actor} of this._rows) {
+            if (entry.kind === 'filler') {
+                // St.DrawingArea draws inside its content box, so label padding
+                // would shrink the canvas and clip the dots. Size the drawing
+                // surface itself instead.
+                actor.style = '';
+                actor.height = Math.round(40 * scale);
+                continue;
+            }
             actor.style = `font-size: ${16 * scale}px; padding: ${10 * scale}px 0;`;
-            if (entry.kind === 'filler') actor.height = Math.round(40 * scale);
         }
         this._scheduleFollow();
     }
@@ -150,7 +157,14 @@ export class PlayerLyrics {
         const count = this._settings.get_int('player-lyric-lines');
         const focus = Math.max(0, visible.findIndex(row => row.entry.id === this._focusId));
         const start = Math.max(0, focus - (count >= 3 ? 1 : 0));
-        const chosen = visible.slice(start, start + count);
+        // The countdown row is extra: it must not take the place of a lyric
+        // line, otherwise enabling it silently drops a visible line.
+        const chosen = [];
+        let lyrics = 0;
+        for (const row of visible.slice(start)) {
+            if (row.entry.kind === 'lyric' && lyrics++ >= count) break;
+            chosen.push(row);
+        }
         const height = chosen.reduce((total, row) => total +
             row.actor.get_preferred_height(this._list.width || this._width)[1], 0);
         // Reserve the chosen number of source rows; wrapped words keep their full height.
@@ -168,8 +182,14 @@ export class PlayerLyrics {
     _paintDots(actor, entry) {
         const cr = actor.get_context();
         const scale = this._scale || 1;
+        const radius = 7 * scale;
+        const step = 24 * scale;
+        // The canvas is the drawing area's content box. Derive the geometry
+        // from it so the dots stay inside and share the lyric text origin.
+        const height = actor.height || Math.round(40 * scale);
+        const centerY = height / 2;
         countdownDots(entry, this._getPosition?.() ?? this._position, this._settings.get_boolean('animate-lyrics')).forEach((dot, index) => {
-            cr.arc((8 + index * 24) * scale, (22 - dot.lift * 7) * scale, 7 * scale, 0, Math.PI * 2);
+            cr.arc(radius + index * step, centerY - dot.lift * radius, radius, 0, Math.PI * 2);
             cr.setSourceRGBA(1, 1, 1, dot.alpha);cr.fill();
         });
         cr.$dispose();

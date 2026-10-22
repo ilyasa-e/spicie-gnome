@@ -2,6 +2,11 @@
 !docs/
 !docs/**
 
+# Allow the test suite. The global ignore file excludes tests/, so the
+# negation has to live here to keep the suite in the repository.
+!tests/
+!tests/**
+
 # Logs & temp
 *.log
 .DS_Store

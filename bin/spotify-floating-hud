@@ -22,6 +22,7 @@ import { LyricsProvider } from '../lyricsProvider.js';
 import { fetchTrackLyrics } from '../lyricsRequest.js';
 import { lyricAttribution, attributionMarkup, requiresVisibleAttribution } from '../lyricsAttribution.js';
 import { lineAlignment } from '../lyricsPresentation.js';
+import { treatsMessageAsLyrics } from '../hudLifecycle.js';
 import { floatingFrame, countdownDots, LyricRowMotion } from '../lyricsView.js';
 
 // Load X11 surface methods when available. Wayland-only GTK builds do not need
@@ -35,7 +36,10 @@ export class FloatingLyricsHUDApp {
     constructor() {
         this._app = new Gtk.Application({
             application_id: 'dev.norang.SpotifyFloatingLyricsHUD',
-            flags: Gio.ApplicationFlags.FLAGS_NONE,
+            // The extension owns exactly one window and kills it on disable.
+            // Uniqueness made a respawn silently exit while a stale instance
+            // still owned the application id, leaving no visible lyrics.
+            flags: Gio.ApplicationFlags.NON_UNIQUE,
         });
 
         this._win = null;
@@ -232,7 +236,7 @@ export class FloatingLyricsHUDApp {
                         const [line] = stream.read_line_finish_utf8(res);
                         if (line === null) {
                             // Extension exited or closed stdin -> cleanly exit HUD
-                            if (this._hasStdinLyrics) this._app.quit();
+                            this._app.quit();
                             return;
                         }
                         this._handleIPCMessage(line);
@@ -253,9 +257,18 @@ export class FloatingLyricsHUDApp {
             const msg = JSON.parse(rawJson);
             if (!msg || !msg.type) return;
             if (!['lyrics', 'sync', 'exit'].includes(msg.type)) return;
-            if (!this._hasStdinLyrics) this._lyricsProvider?.cancel();
-            this._hasStdinLyrics = true;
-            ++this._requestGeneration;
+            // Only actual lyric rows make the extension authoritative. A sync
+            // alone, or an empty payload caused by a failed fetch, means the
+            // window should keep (or start) its own fallback instead of going
+            // blank until the setting is toggled.
+            const hasLines = Array.isArray(msg.lines) && msg.lines.length > 0;
+            if (treatsMessageAsLyrics(msg) && hasLines) {
+                if (!this._hasStdinLyrics) this._lyricsProvider?.cancel();
+                this._hasStdinLyrics = true;
+                ++this._requestGeneration;
+            } else if (treatsMessageAsLyrics(msg)) {
+                this._hasStdinLyrics = false;
+            }
 
             switch (msg.type) {
                 case 'lyrics':
@@ -284,6 +297,14 @@ export class FloatingLyricsHUDApp {
                     break;
             }
             this._drawingArea?.queue_draw();
+            if (treatsMessageAsLyrics(msg) && !hasLines) {
+                // The extension had nothing to show for this track. Recover
+                // independently so the window is not blank for the song.
+                const known = this._mpris?.track;
+                const track = { ...(known || {}), title: msg.title || known?.title || '',
+                    artist: msg.artist || known?.artist || '' };
+                if (track.title) this._loadTrack(track);
+            }
         } catch (e) {
             // Ignore malformed JSON line
         }
@@ -320,7 +341,8 @@ export class FloatingLyricsHUDApp {
         });
     }
 
-    async _loadTrack(track) {
+    async _loadTrack(track, retried = false) {
+        if (this._hasStdinLyrics) return;
         const generation = ++this._requestGeneration;
         this._lines = [];
         this._setAttribution(null);
@@ -334,6 +356,14 @@ export class FloatingLyricsHUDApp {
         try {
             const result = await fetchTrackLyrics(this._lyricsProvider, track, this._settings);
             if (!result || generation !== this._requestGeneration || this._hasStdinLyrics) return;
+            if (result.failed && !retried) {
+                this._fallbackRetry = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 900, () => {
+                    this._fallbackRetry = 0;
+                    this._loadTrack(track, true);
+                    return GLib.SOURCE_REMOVE;
+                });
+                return;
+            }
             this._lines = result.lines || [];
             this._setAttribution(lyricAttribution(result), result.expiresAt);
             this._drawingArea?.queue_draw();
@@ -347,6 +377,7 @@ export class FloatingLyricsHUDApp {
         if (this._fallbackStart) GLib.Source.remove(this._fallbackStart);
         if (this._clockRefresh) GLib.Source.remove(this._clockRefresh);
         if (this._heightUpdateId) GLib.Source.remove(this._heightUpdateId);
+        if (this._fallbackRetry) GLib.Source.remove(this._fallbackRetry);
         if (this._lyricsExpiryId) GLib.Source.remove(this._lyricsExpiryId);
         this._lyricsProvider?.destroy();
         this._mpris?.destroy();

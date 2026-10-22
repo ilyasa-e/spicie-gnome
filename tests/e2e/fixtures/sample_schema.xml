@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.spotify-floating-lyrics"
+          path="/org/gnome/shell/extensions/spotify-floating-lyrics/">
+    
+    <key name="show-in-panel" type="b">
+      <default>true</default>
+      <summary>Show in GNOME Top Bar</summary>
+      <description>Display the currently sung line of lyrics inside the GNOME Shell Top Bar.</description>
+    </key>
+
+    <key name="show-floating" type="b">
+      <default>true</default>
+      <summary>Show Desktop Floating Overlay</summary>
+      <description>Display the floating multi-line lyrics HUD overlay on the desktop.</description>
+    </key>
+
+    <key name="floating-always-on-top" type="b">
+      <default>true</default>
+      <summary>Always on Top</summary>
+      <description>Keep the floating lyrics HUD above standard application windows.</description>
+    </key>
+
+    <key name="floating-click-passthrough" type="b">
+      <default>false</default>
+      <summary>Click Passthrough</summary>
+      <description>Make the floating HUD non-reactive so mouse clicks pass through to windows beneath.</description>
+    </key>
+
+    <key name="floating-position" type="s">
+      <choices>
+        <choice value="top-right"/>
+        <choice value="bottom-right"/>
+        <choice value="top-left"/>
+        <choice value="bottom-left"/>
+        <choice value="center"/>
+        <choice value="custom"/>
+      </choices>
+      <default>'top-right'</default>
+      <summary>Floating HUD Position Preset</summary>
+      <description>Pre-configured screen placement or custom draggable coordinates.</description>
+    </key>
+
+    <key name="floating-x" type="i">
+      <default>100</default>
+      <summary>Floating HUD X Coordinate</summary>
+      <description>Custom X position on the primary monitor in pixels.</description>
+    </key>
+
+    <key name="floating-y" type="i">
+      <default>100</default>
+      <summary>Floating HUD Y Coordinate</summary>
+      <description>Custom Y position on the primary monitor in pixels.</description>
+    </key>
+
+    <key name="font-family" type="s">
+      <default>'Sans'</default>
+      <summary>Font Family</summary>
+      <description>Font family name for rendering lyrics text.</description>
+    </key>
+
+    <key name="font-size" type="i">
+      <range min="12" max="48"/>
+      <default>22</default>
+      <summary>Font Size</summary>
+      <description>Base font size for floating lyrics in pixels.</description>
+    </key>
+
+    <key name="line-spacing" type="i">
+      <range min="4" max="32"/>
+      <default>14</default>
+      <summary>Line Spacing</summary>
+      <description>Vertical spacing between lyric lines in pixels.</description>
+    </key>
+
+    <key name="background-style" type="s">
+      <choices>
+        <choice value="transparent"/>
+        <choice value="blur"/>
+        <choice value="dark-card"/>
+      </choices>
+      <default>'transparent'</default>
+      <summary>Background Style</summary>
+      <description>Visual background treatment for the floating HUD overlay.</description>
+    </key>
+
+    <key name="enable-spicy-lyrics" type="b">
+      <default>false</default>
+      <summary>Enable Spicy Lyrics API</summary>
+      <description>Fetch Apple Music syllable-synced lyrics from Spicy Lyrics API when enabled.</description>
+    </key>
+
+    <key name="spicy-lyrics-token" type="s">
+      <default>''</default>
+      <summary>Spicy Lyrics Access Token</summary>
+      <description>Spotify Web access token for authenticating with Spicy Lyrics API.</description>
+    </key>
+
+    <key name="enable-romanization" type="b">
+      <default>true</default>
+      <summary>Enable Romanization</summary>
+      <description>Transliterate Korean Hangul, Japanese Kana, and Cyrillic scripts to Latin.</description>
+    </key>
+
+  </schema>
+</schemalist>

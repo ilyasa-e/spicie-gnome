@@ -12,6 +12,14 @@ import { SpotifyLyricsPopup } from './popupMenu.js';
 import { lyricAttribution } from './lyricsAttribution.js';
 import { fetchTrackLyrics, LYRICS_SETTINGS } from './lyricsRequest.js';
 import { floatingPosition, isLyricsWindow, hideLyricsWindowFromLists } from './lyricsPresentation.js';
+import { recoveryDelayMs } from './hudLifecycle.js';
+
+const wait = ms => new Promise(resolve => {
+    GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.max(1, ms), () => {
+        resolve();
+        return GLib.SOURCE_REMOVE;
+    });
+});
 
 export default class SpotifyFloatingLyricsExtension extends Extension {
     enable() {
@@ -26,6 +34,10 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._hudSubprocess = null;
         this._hudWaylandClient = null;
         this._hudStdinStream = null;
+        this._hudExpectedExit = false;
+        this._hudSpawnUs = 0;
+        this._hudRapidExits = 0;
+        this._hudReconcileId = 0;
         this._hudWindowSignals = [];
         this._hudWindows = new Set();
         this._windowCreatedSignalId = 0;
@@ -105,6 +117,10 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
 
             if (isPlaying) {
                 this._startPositionTicker();
+                // Pausing and resuming is the user's manual resync. Make it
+                // authoritative too: query Spotify instead of trusting the
+                // interpolated clock that may have drifted while paused.
+                this._refreshPositionAndSync();
             } else {
                 this._stopPositionTicker();
                 this._sync.updatePosition(pos);
@@ -181,14 +197,26 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         }
     }
 
+    _scheduleHUDReconcile(delayMs) {
+        if (!this._settings?.get_boolean('show-floating') || this._hudReconcileId) return;
+        this._hudReconcileId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.max(0, delayMs), () => {
+            this._hudReconcileId = 0;
+            this._syncHUDLifecycle();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
     _ensureHUDProcess() {
         if (this._hudSubprocess) return;
 
         try {
             const exePath = this._getHUDExecutablePath();
             if (!GLib.file_test(exePath, GLib.FileTest.IS_EXECUTABLE)) {
+                console.warn(`[SpotifyFloatingLyrics] Lyrics window is not installed at ${exePath}`);
                 return;
             }
+            this._hudExpectedExit = false;
+            this._hudSpawnUs = GLib.get_monotonic_time();
 
             const launcher = new Gio.SubprocessLauncher({
                 flags: Gio.SubprocessFlags.STDIN_PIPE,
@@ -221,6 +249,15 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
                     this._hudStdinStream = null;
                     this._hudWaylandClient = null;
                 }
+                // A window that dies on its own (missing module, GPU reset,
+                // compositor restart) must come back without the user having
+                // to toggle the setting off and on.
+                if (!this._hudExpectedExit) {
+                    const lifetimeUs = GLib.get_monotonic_time() - (this._hudSpawnUs || 0);
+                    if (lifetimeUs < 1000000) this._hudRapidExits = (this._hudRapidExits || 0) + 1;
+                    else this._hudRapidExits = 0;
+                    this._scheduleHUDReconcile(recoveryDelayMs(lifetimeUs, this._hudRapidExits));
+                }
             });
 
             // Resend current state to newly launched HUD
@@ -251,6 +288,11 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
     }
 
     _stopHUDProcess() {
+        this._hudExpectedExit = true;
+        if (this._hudReconcileId) {
+            GLib.Source.remove(this._hudReconcileId);
+            this._hudReconcileId = 0;
+        }
         if (this._hudStdinStream) {
             this._sendHUDMessage({ type: 'exit' });
             try {
@@ -274,10 +316,38 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             if (msg.type === 'sync') msg = { ...msg, sampleTimeUs: GLib.get_monotonic_time(), rate: this._mpris?.rate || 1 };
             const text = JSON.stringify(msg) + '\n';
             const bytes = new GLib.Bytes(new TextEncoder().encode(text));
-            this._hudStdinStream.write_bytes_async(bytes, GLib.PRIORITY_DEFAULT, null, null);
+            const stream = this._hudStdinStream;
+            stream.write_bytes_async(bytes, GLib.PRIORITY_DEFAULT, null, (target, res) => {
+                try {
+                    target.write_bytes_finish(res);
+                } catch (e) {
+                    // A closed pipe means the window is gone even though the
+                    // process handle still looks alive. Reconnect it.
+                    if (this._hudExpectedExit || this._hudStdinStream !== target) return;
+                    this._hudStdinStream = null;
+                    this._scheduleHUDReconcile(500);
+                }
+            });
         } catch (e) {
             // Stream may have closed
         }
+    }
+
+    // Re-reads Spotify's own position and pushes it to every surface. Used
+    // after a track change and after resuming, where interpolation alone can
+    // be stale for a moment.
+    _refreshPositionAndSync() {
+        if (!this._mpris) return;
+        const result = this._mpris.refreshPosition?.();
+        if (!result?.then) return;
+        result.then(ok => {
+            if (!ok || !this._mpris) return;
+            const pos = this._mpris.getPositionMs();
+            this._sync?.updatePosition(pos);
+            this._popup?.updatePosition(pos);
+            this._sendHUDMessage({ type: 'sync',
+                status: this._mpris.playbackStatus || 'Playing', positionMs: pos });
+        }).catch(() => {});
     }
 
     _initHUDWindowTracking() {
@@ -398,7 +468,15 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         }
     }
 
-    async _onTrackChanged(track) {
+    // Callers are signal handlers that cannot await, so a failure here must
+    // never surface as an unhandled rejection that hides the real error.
+    _onTrackChanged(track) {
+        return this._loadTrackLyrics(track).catch(e => {
+            console.error('[SpotifyFloatingLyrics] Lyrics update error:', e);
+        });
+    }
+
+    async _loadTrackLyrics(track) {
         const requestId = (this._lyricsRequestId || 0) + 1;
         this._lyricsRequestId = requestId;
         this._setLyricsAttribution(null);
@@ -419,21 +497,19 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._indicator.updatePlayback(isPlaying, track);
         this._popup.updateMetadata(track, isPlaying);
 
-        // Clear existing lyrics display while fetching
-        this._sync.setLyrics([]);
-        this._popup.setLyrics([]);
-        this._indicator.updateLyric('');
-        this._sendHUDMessage({ type: 'lyrics', title: track.title || '', artist: track.artist || '', lines: [] });
-
+        // Keep the previous lyrics on screen while the next set loads. Clearing
+        // here blanks the floating window (and collapses it to an empty strip)
+        // for the whole fetch, which reads as "the HUD disappeared".
         const title = track.title || '';
         const artist = track.artist || '';
 
         try {
-            const res = await fetchTrackLyrics(this._lyricsProvider, track, this._settings);
+            const res = await this._fetchLyrics(track, requestId);
+            if (requestId !== this._lyricsRequestId) return;
 
             // Verify track hasn't changed while awaiting fetch
             const nowTrack = this._mpris.track;
-            if (requestId === this._lyricsRequestId && nowTrack && nowTrack.title === title) {
+            if (nowTrack && nowTrack.title === title) {
                 if (res && Array.isArray(res.lines) && res.lines.length > 0) {
                     this._setLyricsAttribution(res);
                     this._sync.setLyrics(res.lines);
@@ -451,13 +527,17 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
 
                     const pos = this._mpris.getPositionMs();
                     this._sync.updatePosition(pos);
+                    this._popup.updatePosition(pos);
                     this._sendHUDMessage({
                         type: 'sync',
                         status: this._mpris.playbackStatus || 'Playing',
                         positionMs: pos
                     });
+                    this._refreshPositionAndSync();
                 } else {
+                    this._sync.setLyrics([]);
                     this._popup.setLyrics([]);
+                    this._indicator.updateLyric('');
                     this._sendHUDMessage({
                         type: 'lyrics',
                         title,
@@ -469,8 +549,30 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         } catch (e) {
             if (requestId !== this._lyricsRequestId || !this._popup) return;
             console.error('[SpotifyFloatingLyrics] Lyrics fetch error:', e);
+            this._sync.setLyrics([]);
             this._popup.setLyrics([]);
+            this._indicator.updateLyric('');
+            this._sendHUDMessage({ type: 'lyrics', title, artist, lines: [] });
         }
+    }
+
+    // Network hiccups should not leave a track permanently without lyrics.
+    // An empty answer without a failure flag is a legitimate "no synced
+    // lyrics" response and is returned immediately.
+    async _fetchLyrics(track, requestId) {
+        let last = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            if (requestId !== this._lyricsRequestId) return null;
+            try {
+                const res = await fetchTrackLyrics(this._lyricsProvider, track, this._settings);
+                if (!res?.failed) return res;
+                last = res;
+            } catch (e) {
+                last = null;
+            }
+            if (attempt === 0) await wait(700);
+        }
+        return last;
     }
 
     _setLyricsAttribution(result) {
@@ -508,6 +610,10 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._lyricsRequestId = (this._lyricsRequestId || 0) + 1;
         this._setLyricsAttribution(null);
         this._stopPositionTicker();
+        if (this._hudReconcileId) {
+            GLib.Source.remove(this._hudReconcileId);
+            this._hudReconcileId = 0;
+        }
         this._stopHUDProcess();
 
         for (const id of this._hudGrabSignals || []) global.display.disconnect(id);

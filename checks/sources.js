@@ -69,6 +69,14 @@ const pause = ms => new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAUL
         check(`Server-selected ${source} timing uses the same response path`, response.source === source && response.lines.length > 0);
         check(`${source} does not show empty community credits`, lyricAttribution(response).contributors.length === 0);
     }
+    const failing = new LyricsProvider({session:{sendAsync:async () => {throw new Error('network down');}},cacheDir:root});
+    const failedFetch = await failing.fetchLyrics('Offline Song','Artist','Album',10,'',{enableSpicy:false});
+    failing.destroy();
+    check('A transport failure is reported instead of looking like empty lyrics', failedFetch.failed === true && failedFetch.lines.length === 0);
+    const missing = new LyricsProvider({session:{sendAsync:async () => ({status:404,body:{}})},cacheDir:root});
+    const missingFetch = await missing.fetchLyrics('Missing Song','Artist','Album',10,'',{enableSpicy:false});
+    missing.destroy();
+    check('A song without lyrics stays a definitive empty answer', missingFetch.failed !== true && missingFetch.lines.length === 0);
     print(`${count} source checks passed`);
 })().catch(error => {failed=true;printerr(error.stack);}).finally(() => {
     provider?.destroy();

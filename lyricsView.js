@@ -14,9 +14,11 @@ export function lyricEntries(lines, countdown = true) {
         if (line.isInterlude || !(line.words || line.text || '').trim()) continue;
         const start = lyricStartTime(line);
         if (countdown && start - end >= 2500) {
-            const startTimeMs = Math.max(end, start - 4000);
+            // The three dots divide the whole gap between the previous vocal
+            // (or the start of the song) and the next one, so the row is
+            // visible for the entire wait instead of only its final seconds.
             result.push({id: `gap:${index}`, kind: 'filler', index, line,
-                start: startTimeMs, startTimeMs, endTimeMs: start});
+                start: end, startTimeMs: end, endTimeMs: start});
         }
         result.push({id: `line:${index}`, kind: 'lyric', index, line, start});
         end = Math.max(end, Number.isFinite(line.endTimeMs) ? line.endTimeMs :
@@ -53,14 +55,35 @@ export function floatingFrame(lines, positionMs, count = 2, countdown = true) {
     return {rows, filler, finished, ending, activeIndex: active[0]?.index ?? previous?.index ?? -1};
 }
 
-export function countdownDots(filler, positionMs, animate = true) {
+export const DOT_FADE_MS = 320;
+
+// The three dots hand the highlight to each other. Brightness has to travel
+// between them: a step change at each third boundary reads as a hard pop, one
+// per dot, and is the thing that makes the countdown look cheap.
+//
+// The fade window is a fixed slice of real time rather than a slice of the
+// gap. Scaled to the gap it would be correct for a three second pause but
+// would take eleven seconds to cross on a long intro, so the dots would look
+// frozen instead of handing over.
+export function countdownDots(filler, positionMs, animate = true, fadeMs = DOT_FADE_MS) {
     if (!filler) return [];
-    const progress = Math.max(0, Math.min(1, (positionMs - filler.startTimeMs) /
-        Math.max(1, filler.endTimeMs - filler.startTimeMs)));
+    const span = Math.max(1, filler.endTimeMs - filler.startTimeMs);
+    const progress = Math.max(0, Math.min(1, (positionMs - filler.startTimeMs) / span));
+    // Fade measured in thirds of the gap, bounded so a short gap cannot be
+    // asked for a crossfade longer than the third it has to cross.
+    const fade = Math.max(0.02, Math.min(0.45, (fadeMs / span) * 3));
     return [0, 1, 2].map(index => {
-        const phase = Math.max(0, Math.min(1, progress * 3 - index));
-        return {lift: animate ? Math.sin(Math.PI * phase) : 0,
-            alpha: progress * 3 >= index && phase < 1 ? 1 : phase >= 1 ? 0.75 : 0.3};
+        // Unclamped position within this dot's own third, so the fades on
+        // either side of it are visible here instead of being cut off.
+        const x = progress * 3 - index;
+        const lift = animate ? Math.sin(Math.PI * Math.max(0, Math.min(1, x))) : 0;
+        let alpha;
+        if (x <= -fade) alpha = 0.3;
+        else if (x < 0) alpha = 0.3 + 0.7 * (x + fade) / fade;
+        else if (x <= 1) alpha = 1;
+        else if (x < 1 + fade) alpha = 1 - 0.25 * (x - 1) / fade;
+        else alpha = 0.75;
+        return {lift, alpha};
     });
 }
 

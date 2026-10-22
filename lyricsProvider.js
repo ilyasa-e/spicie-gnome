@@ -275,7 +275,11 @@ export class LyricsProvider {
                 return { provider: 'none', instrumental: false, syncedLyrics: null, plainLyrics: null, lines: [] };
             }
             console.debug('SpotifyFloatingLyrics: lyrics fetch error:', err.message);
-            return { provider: 'none', instrumental: false, syncedLyrics: null, plainLyrics: null, lines: [] };
+            // A transport/HTTP failure is not the same answer as "this song has
+            // no lyrics". Mark it so callers can retry instead of leaving the
+            // window blank for the rest of the track.
+            return { provider: 'none', instrumental: false, syncedLyrics: null, plainLyrics: null,
+                lines: [], failed: true };
         }
     }
 

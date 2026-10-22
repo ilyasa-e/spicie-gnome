@@ -2,6 +2,18 @@
 
 Music controls and live lyrics for the Spotify desktop app, without changing Spotify itself.
 
+## Settings
+
+Settings has three tabs.
+
+- **General → Lyrics source** picks where lyrics come from. LRCLIB is always
+  available; **Use Spicy Lyrics** adds word-level timing with a client key.
+- **General → Text** holds the options every lyric surface shares:
+  **Romanize Korean, Japanese and Cyrillic**, **Countdown dots before the next
+  lyric**, and **Animate lyrics**.
+- **Desktop lyrics** covers the floating overlay on the desktop.
+- **Player** covers the top bar indicator and the player card.
+
 ## Player
 
 Click the music indicator in the top bar to open the player. Choose a layout in **Settings → Player → Layout**:
@@ -17,8 +29,8 @@ Use the pin button or **Keep player on desktop** to keep the player visible. Dra
 controls, spacing, and its lyric panel. It changes the actual layout size, so
 buttons and dragging continue to match their visible positions.
 
-In **Settings → Player → Player lyrics**, enable **Show lyrics** for Horizontal
-and choose one to eight **Visible lyric lines**. A player near the top places
+In **Settings → Player → Lyrics in the player**, enable **Show lyrics** for
+Horizontal and choose one to eight **Lines**. A player near the top places
 lyrics below it; a player near the bottom places lyrics above it. Scroll freely
 and click **Follow song** to return to the current line. When lyrics are off,
 source credits sit below the song controls and above the footer buttons.
@@ -26,12 +38,12 @@ Compact always uses this credit placement.
 
 ## Lyrics
 
-Lyrics can appear in the top bar, on the desktop, inside the player, or in multiple locations. The top-bar indicator and pinned player appear only while Spotify is available. Choose Left or Right with **Top bar position**. Left places the indicator after the workspace indicator. The top-bar line stays visible between phrases and is cleared when seeking before the first lyric or switching songs. Horizontal layout can show a separate scrolling lyric panel in the popup and pinned player. Compact always keeps lyrics out of the player.
+Lyrics can appear in the top bar, on the desktop, inside the player, or in multiple locations. The top-bar indicator and pinned player appear only while Spotify is available. Choose Left or Right with **Settings → Player → Top bar → Position**. Left places the indicator after the workspace indicator. The top-bar line stays visible between phrases and is cleared when seeking before the first lyric or switching songs. Horizontal layout can show a separate scrolling lyric panel in the popup and pinned player. Compact always keeps lyrics out of the player.
 
-**Settings → Player → Top bar** has separate Artist, Song title, and Lyrics
+**Settings → Player → Top bar** has separate Artist, Song title, and Lyric line
 switches. Selected fields use ` | ` between them; empty or hidden fields leave
 no extra separators. Turning all three off keeps the playback button. The player
-shows source details when opened, even with Player lyrics off. The top bar
+shows source details when opened, even with player lyrics off. The top bar
 shows only the selected song fields; source credits stay in the player and
 floating lyrics.
 
@@ -40,25 +52,27 @@ Desktop lyrics use one lightweight window. **Animate lyrics** is the only animat
 The lyrics window is hidden from the taskbar, application switcher, and window
 previews while the extension manages it. It remains visible on the desktop and
 can still be dragged when click-through is off. The settings window remains a
-normal application window. **Always on top** controls stacking separately.
+normal application window. **Keep above windows** controls stacking separately.
 
-Open **Settings → Lyrics** for a placement preview, screen position, text alignment, font, background, and mouse behaviour. Settings are searchable and changes apply immediately.
+Open **Settings → Desktop lyrics** for a placement preview, screen position, text alignment, font, background, and mouse behaviour. Settings are searchable and changes apply immediately.
 
 The default screen position is **Top center**, below the top bar. Top left, Top right, Center, and the three bottom positions are also available. Dragging the lyrics saves a **Custom** position. **Reset placement** restores Top center and automatic vocalist alignment.
 
-**Text alignment** is separate from screen position: choose Left, Center, Right, or **By vocalist**. By vocalist uses the source's `OppositeAligned` flag to place voices on the left or right, including overlapping lead vocals. Without that flag, text stays centered. Manual alignment applies to all voices. The same window handles normal and animated lyrics. Transparent draws no background.
+**Desktop text alignment** is separate from screen position: choose Left, Center, Right, or **By vocalist**. By vocalist uses the source's `OppositeAligned` flag to place voices on the left or right, including overlapping lead vocals. Without that flag, text stays centered. Manual alignment applies to all voices. The same window handles normal and animated lyrics. Transparent draws no background.
 
-Turn on **Let clicks pass through** to interact with the app behind the lyrics. Use **Move desktop lyrics → Move** to turn click-through off and drag the lyrics again. The first lyric is visible while waiting, without early karaoke highlighting.
+Turn on **Let clicks pass through** to interact with the app behind the lyrics. Use **Move lyrics → Move** to turn click-through off and drag the lyrics again. The first lyric is visible while waiting, without early karaoke highlighting.
 
-**Settings → Lyrics → Visible lines** selects one to eight lyric lines (two by
-default). With two, the active lyric is first and the next line is below it.
+In **Settings → Desktop lyrics → Overlay**, the **Lines** row selects one to
+eight lyric lines (two by default). With two, the active lyric is first and the next line is below it.
 With three or more, one previous line sits above the active lyric in row two.
 The first lyric starts in row one. Other lines are dimmed, and simultaneous
 vocalists remain visible even if that exceeds the chosen context count.
 
-**Countdown dots** show three timed dots in long intros and vocal gaps. They
-cover the last four seconds of gaps at least 2.5 seconds long and disappear at
-the next lyric's exact start. Pause freezes them; seeking rebuilds their state.
+**Countdown dots** show three timed dots in long intros and vocal gaps of at
+least 2.5 seconds. The row is visible for the whole wait, from the previous
+vocal or the start of the song, and the three dots divide that wait evenly so
+the last one lands on the next lyric. They disappear at its exact start. Pause
+freezes them; seeking rebuilds their state.
 Turning Animate lyrics off removes their bounce while keeping the countdown.
 The countdown is a row in the lyric sequence, before the next vocal. The first
 lyric is already visible below it during an intro. Existing rows scroll smoothly
@@ -92,7 +106,7 @@ links. It does not make a separate community request or force a commercial
 source. See the [source hierarchy](https://developers.spicylyrics.org/docs/sync-sources#the-hierarchy).
 
 
-LRCLIB supplies lyrics without sign-in. **Settings → Sources** also offers Spicy Lyrics for word timing, with a [Spicy Lyrics client key](https://developers.spicylyrics.org/docs/keys). Spotify access tokens and Spicy Lyrics secret keys do not belong in the extension. The integration uses its current `/v1/lyrics/{trackId}` route and also understands catalogue TTML. The default source is used when the optional source is unavailable.
+LRCLIB supplies lyrics without sign-in. **Settings → General → Lyrics source** also offers Spicy Lyrics for word timing, with a [Spicy Lyrics client key](https://developers.spicylyrics.org/docs/keys). Spotify access tokens and Spicy Lyrics secret keys do not belong in the extension. The integration uses its current `/v1/lyrics/{trackId}` route and also understands catalogue TTML. The default source is used when the optional source is unavailable.
 
 Spicie is an independent app and is not made or endorsed by Spicy Lyrics. Source credits appear in the player and floating lyrics, including contributor links for community syncs. LRCLIB credits appear in the player and at the end of desktop lyrics. Saved lyrics expire within 30 days; expired or older unversioned cache files are discarded. Lyrics are only displayed inside the app and are not offered as downloads or a shared service.
 
@@ -121,6 +135,7 @@ gnome-extensions prefs spotify-floating-lyrics@norang.dev
 ```bash
 glib-compile-schemas --strict schemas
 gjs -m checks/player.js
+gjs -m checks/hud.js
 GSETTINGS_BACKEND=memory gjs -m checks/karaoke.js
 GSETTINGS_BACKEND=memory gjs -m checks/sources.js
 GSETTINGS_BACKEND=memory gjs -m checks/presentation.js
@@ -130,3 +145,11 @@ GSETTINGS_BACKEND=memory gjs -m checks/view.js
 ```
 
 The player checks cover artwork loading, cancellation when songs change, fallback colours, and time formatting. The player and settings also need a running GNOME session for visual and interaction checks.
+
+The end-to-end suite lives in `tests/` and runs headless:
+
+```bash
+tests/e2e/run_all.sh
+```
+
+It covers the extension lifecycle, lyric fetching, MPRIS tracking, preferences, romanization, the sync engine, and the UI surfaces, with separate tiers for boundary cases, cross-feature combinations, and real-world workloads.

@@ -18,18 +18,50 @@ check('Finished lyrics clear the context rows', floatingFrame(lines, 32000, 4).f
 check('Ending credits begin with the last lyric before Spotify switches tracks', floatingFrame(lines, 31000, 2).ending && !floatingFrame(lines, 26000, 2).ending);
 check('Seeking backwards rebuilds the first-row focus', activeRow(floatingFrame(lines, 5000, 4)) === 0);
 check('Preview rows never receive active karaoke before their time', floatingFrame(lines, 6000, 4).rows.slice(1).every(row => row.state === 'upcoming'));
-check('The first lyric is also visible before the countdown interval', floatingFrame(lines, 0, 2).rows[0].id === 'line:0');
-const intro = floatingFrame(lines, 2500, 2);
+const intro = floatingFrame(lines, 0, 2);
+check('The first lyric stays visible below the intro countdown', intro.rows[0].kind === 'filler' && intro.rows[1].id === 'line:0');
 check('Intro countdown is immediately followed by the visible first lyric', intro.filler && intro.rows[0].kind === 'filler' && intro.rows[1].index === 0 && intro.rows[1].state === 'upcoming');
-check('Long intros use the last four seconds for countdown', floatingFrame(lines, 500, 2).filler === null && intro.filler.startTimeMs === 1000);
+check('Long intros count down from the start of the gap', floatingFrame(lines, 500, 2).filler !== null && intro.filler.startTimeMs === 0 && intro.filler.endTimeMs === 5000);
 check('Countdown ends exactly when the lyric starts', floatingFrame(lines, 4999, 2).filler && floatingFrame(lines, 5000, 2).filler === null);
 check('Long vocal gaps have a countdown', Boolean(floatingFrame(lines, 8000, 2).filler));
 check('The countdown can be hidden independently', floatingFrame(lines, 8000, 2, false).filler === null);
 check('Short gaps do not get a countdown', floatingFrame([{timeMs: 1000, endTimeMs: 2000, words: 'One'}, {timeMs: 3000, endTimeMs: 4000, words: 'Two'}], 2500).filler === null);
-const dots = countdownDots(intro.filler, 1700);
+const dots = countdownDots(intro.filler, 700);
 check('Countdown dots rise and fall from playback time', dots.length === 3 && dots[0].lift > 0 && dots[1].lift === 0);
-check('The second dot follows the next timed section', countdownDots(intro.filler, 3000)[1].lift > 0);
+check('The second dot follows the next timed section', countdownDots(intro.filler, 2200)[1].lift > 0);
+check('The third dot lands on the next lyric', countdownDots(intro.filler, 4000)[2].lift > 0);
 check('Turning animation off removes spatial movement from all dots', countdownDots(intro.filler, 3000, false).every(dot => dot.lift === 0));
+check('Turning animation off keeps the brightness handover', countdownDots(intro.filler, 3000, false).every(dot => dot.alpha > 0 && dot.alpha <= 1));
+// Brightness has to travel between dots. A step change at a third boundary
+// shows as a hard pop, one per dot, over the whole gap.
+let worstJump = 0;
+let previous = countdownDots(intro.filler, 0);
+for (let t = 16; t <= intro.filler.endTimeMs; t += 16) {
+    const current = countdownDots(intro.filler, t);
+    current.forEach((dot, index) => {
+        worstJump = Math.max(worstJump, Math.abs(dot.alpha - previous[index].alpha));
+    });
+    previous = current;
+}
+check('Dots crossfade between sections instead of popping', worstJump < 0.06);
+check('The handover is smooth on a short gap too', (() => {
+    const short = {startTimeMs: 0, endTimeMs: 2500};
+    let jump = 0;
+    let last = countdownDots(short, 0);
+    for (let t = 16; t <= 2500; t += 16) {
+        countdownDots(short, t).forEach((dot, index) => {
+            jump = Math.max(jump, Math.abs(dot.alpha - last[index].alpha));
+        });
+        last = countdownDots(short, t);
+    }
+    return jump < 0.06;
+})());
+check('The first dot starts lit and the rest stay dim', countdownDots(intro.filler, 0)[0].alpha === 1 &&
+    countdownDots(intro.filler, 0).slice(1).every(dot => dot.alpha < 0.4));
+check('Finished dots settle dimmer than the one still landing', (() => {
+    const done = countdownDots(intro.filler, intro.filler.endTimeMs);
+    return done[2].alpha === 1 && done[0].alpha < done[2].alpha && done[1].alpha < done[2].alpha;
+})());
 const duet = [{timeMs: 1000, endTimeMs: 6000, words: 'First voice'}, {timeMs: 2000, endTimeMs: 3000, words: 'Second voice'}];
 check('Simultaneous voices remain visible even with one context line', floatingFrame(duet, 2500, 1).rows.filter(row => row.state === 'active').length === 2);
 check('A still-singing voice prevents a false instrumental countdown', floatingFrame([...duet, {timeMs: 7000, endTimeMs: 8000, words: 'Next'}], 3500).filler === null);
