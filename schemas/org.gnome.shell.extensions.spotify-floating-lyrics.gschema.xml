@@ -191,15 +191,5 @@
       <summary>Pinned player vertical position</summary>
     </key>
 
-    <key name="hud-renderer" type="s">
-      <choices>
-        <choice value="smooth-gtk"/>
-        <choice value="clutter"/>
-      </choices>
-      <default>'smooth-gtk'</default>
-      <summary>Legacy renderer setting</summary>
-      <description>Retained for settings compatibility. The extension now uses a single floating lyrics window.</description>
-    </key>
-
   </schema>
 </schemalist>

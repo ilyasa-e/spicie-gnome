@@ -6,7 +6,6 @@
 .lyrics-source-link { color: #b4dcff; border-radius: 3px; padding: 0; text-decoration: underline; }
 .lyrics-source-link:hover { text-decoration: underline; }
 .lyrics-source-link:focus { background-color: rgba(255, 255, 255, 0.15); }
-.spotify-floating-content .lyrics-source-credits { margin-top: 6px; margin-left: 0; }
 
 /* ==========================================================================
    1. Top Bar Panel Button & Taskbar Lyric Label
@@ -33,82 +32,6 @@
     color: #ffffff;
     max-width: 380px;
     padding: 0 4px;
-}
-
-/* ==========================================================================
-   2. Desktop Floating Overlay HUD
-   ========================================================================== */
-
-.spotify-floating-hud,
-.floating-lyrics-container,
-.floating-lyrics-box {
-    text-align: center;
-    padding: 18px 24px;
-    border-radius: 16px;
-    min-width: 320px;
-    max-width: 600px;
-}
-
-/* Background Presets */
-.spotify-floating-hud.bg-transparent,
-.floating-hud-transparent {
-    background-color: transparent;
-    border: none;
-    box-shadow: none;
-}
-
-.spotify-floating-hud.bg-blur,
-.floating-hud-blur {
-    background-color: rgba(14, 16, 23, 0.78);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55);
-}
-
-.spotify-floating-hud.bg-dark-card,
-.floating-hud-dark-card {
-    background-color: rgba(12, 12, 14, 0.94);
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.70);
-}
-
-.spotify-floating-hud.dragging {
-    border: 2px dashed rgba(30, 215, 96, 0.85);
-}
-
-.spotify-floating-content {
-    spacing: 6px;
-}
-
-/* Lyric Lines Typography & States */
-.spotify-floating-line,
-.floating-lyrics-line {
-    text-align: center;
-    transition-duration: 250ms;
-}
-
-.spotify-floating-prev,
-.floating-lyrics-past {
-    color: rgba(255, 255, 255, 0.40);
-}
-
-.spotify-floating-next,
-.floating-lyrics-upcoming {
-    color: rgba(255, 255, 255, 0.45);
-}
-
-/* Active Line Glowing Bloom Effect */
-.spotify-floating-active,
-.floating-lyrics-active {
-    color: #ffffff;
-    font-weight: 800;
-    text-shadow: 0 0 16px rgba(255, 255, 255, 0.95);
-}
-
-.spotify-floating-romaji,
-.floating-lyrics-romanized {
-    color: rgba(255, 255, 255, 0.75);
-    font-style: italic;
-    font-weight: 500;
 }
 
 /* Player shared by the top-bar popup and pinned desktop view. */

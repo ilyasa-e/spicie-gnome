@@ -19,6 +19,7 @@ import { activeLineIndex, lyricStartTime } from '../karaokeTiming.js';
 
 import { SpotifyMPRIS } from '../mpris.js';
 import { LyricsProvider } from '../lyricsProvider.js';
+import { fetchTrackLyrics } from '../lyricsRequest.js';
 import { lyricAttribution, attributionMarkup, requiresVisibleAttribution } from '../lyricsAttribution.js';
 import { lineAlignment } from '../lyricsPresentation.js';
 import { floatingFrame, countdownDots, LyricRowMotion } from '../lyricsView.js';
@@ -330,14 +331,9 @@ export class FloatingLyricsHUDApp {
         this._playbackStatus = this._mpris.playbackStatus;
         this._drawingArea?.queue_draw();
         if (!track?.title) return;
-        const enableRomanization = this._settings?.get_boolean('enable-romanization') ?? true;
         try {
-            const result = await this._lyricsProvider.fetchLyrics(track.title, track.artist || '', track.album || '',
-                Math.round((track.durationMs || 0) / 1000), track.trackId || '', {
-                    enableSpicy: this._settings?.get_boolean('enable-spicy-lyrics') ?? false,
-                    spicyClientKey: this._settings?.get_string('spicy-lyrics-client-key') || '', enableRomanization,
-                });
-            if (generation !== this._requestGeneration || this._hasStdinLyrics) return;
+            const result = await fetchTrackLyrics(this._lyricsProvider, track, this._settings);
+            if (!result || generation !== this._requestGeneration || this._hasStdinLyrics) return;
             this._lines = result.lines || [];
             this._setAttribution(lyricAttribution(result), result.expiresAt);
             this._drawingArea?.queue_draw();

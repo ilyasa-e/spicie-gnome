@@ -7,7 +7,7 @@ import { DEFAULT_PALETTE, paletteFromPixels } from './playerTheme.js';
 export class PlayerArtwork {
     constructor(onChanged) {
         this._onChanged = onChanged;
-        this._session = new Soup.Session({ timeout: 12, user_agent: 'SpotifyFloatingLyrics/2' });
+        this._session = new Soup.Session({ timeout: 12, user_agent: 'Spicie/2.0 (GNOME Shell Extension)' });
         this._url = null;
         this._generation = 0;
         this.value = { gicon: null, palette: DEFAULT_PALETTE };

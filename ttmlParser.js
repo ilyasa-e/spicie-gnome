@@ -63,7 +63,12 @@ export function parseTtml(xml) {
         if (lineEnd === null && lineStart !== null && duration !== null) lineEnd = lineStart + duration;
         function collect(child, timing = null, preserve = node.attributes['xml:space'] === 'preserve') {
             if (typeof child === 'string') {
-                const value = preserve ? child : child.replace(/\s+/g, ' ');
+                let value = preserve ? child : child.replace(/\s+/g, ' ');
+                // Pretty-printed TTML puts whitespace between sibling spans. Do
+                // not turn that formatting into a second space when the span
+                // before it already ends with one.
+                if (!preserve && text.endsWith(' ') && value.startsWith(' ')) value = value.replace(/^ +/, '');
+                if (!value) return;
                 const start = text.length;
                 text += value;
                 if (timing && value) {

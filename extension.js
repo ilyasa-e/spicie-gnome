@@ -10,6 +10,7 @@ import { LyricsSync } from './lyricsSync.js';
 import { SpotifyIndicator } from './indicator.js';
 import { SpotifyLyricsPopup } from './popupMenu.js';
 import { lyricAttribution } from './lyricsAttribution.js';
+import { fetchTrackLyrics, LYRICS_SETTINGS } from './lyricsRequest.js';
 import { floatingPosition, isLyricsWindow, hideLyricsWindowFromLists } from './lyricsPresentation.js';
 
 export default class SpotifyFloatingLyricsExtension extends Extension {
@@ -70,7 +71,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
                 for (const window of this._hudWindows) this._applyHUDPosition(window);
             }));
         }
-        for (const key of ['enable-spicy-lyrics', 'spicy-lyrics-client-key', 'enable-romanization']) {
+        for (const key of LYRICS_SETTINGS) {
             this._settingsSignals.push(this._settings.connect(`changed::${key}`, () => {
                 this._onTrackChanged(this._mpris.track);
             }));
@@ -424,26 +425,11 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._indicator.updateLyric('');
         this._sendHUDMessage({ type: 'lyrics', title: track.title || '', artist: track.artist || '', lines: [] });
 
-        const enableSpicy = this._settings.get_boolean('enable-spicy-lyrics');
-        const spicyClientKey = this._settings.get_string('spicy-lyrics-client-key');
-        const enableRomaji = this._settings.get_boolean('enable-romanization');
-        this._lyricsProvider.setEnableRomanization(enableRomaji);
+        const title = track.title || '';
+        const artist = track.artist || '';
 
         try {
-            const title = track.title || '';
-            const artist = track.artist || '';
-            const album = track.album || '';
-            const durationSec = Math.round((track.durationMs || 0) / 1000);
-            const trackId = track.trackId || '';
-
-            const res = await this._lyricsProvider.fetchLyrics(
-                title,
-                artist,
-                album,
-                durationSec,
-                trackId,
-                { enableSpicy, spicyClientKey }
-            );
+            const res = await fetchTrackLyrics(this._lyricsProvider, track, this._settings);
 
             // Verify track hasn't changed while awaiting fetch
             const nowTrack = this._mpris.track;
