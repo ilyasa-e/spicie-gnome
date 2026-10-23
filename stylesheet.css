@@ -41,9 +41,10 @@
 .spotify-player-menu-item:hover, .spotify-player-menu-item:active { background-color: transparent; }
 .spotify-player-card { width: 256px; padding: 12px; border-radius: 12px; box-shadow: none; }
 .spotify-player-card.horizontal { width: 320px; }
-.spotify-player-card.compact { width: 144px; padding: 10px; }
+.spotify-player-card.vertical { width: 200px; padding: 14px; border-radius: 16px; }
 .spotify-player-header { spacing: 10px; }
 .spotify-player-cover { border-radius: 10px; background-color: rgba(255,255,255,0.06); }
+.spotify-player-cover:focus { box-shadow: inset 0 0 0 2px rgba(255,255,255,0.65); }
 .spotify-player-title { font-size: 14px; font-weight: 600; max-width: 190px; }
 .spotify-player-artist { font-size: 12px; margin-top: 2px; max-width: 190px; }
 .spotify-player-controls { spacing: 14px; margin-top: 10px; margin-bottom: 4px; }
@@ -72,21 +73,9 @@
 .horizontal .spotify-player-progress { margin-top: 6px; }
 .horizontal .spotify-player-footer { padding-top: 0; }
 .horizontal .spotify-player-utility { width: 26px; height: 26px; }
-.compact .spotify-player-header { spacing: 8px; }
-.compact .spotify-player-cover { border-radius: 6px; }
-.compact .spotify-player-title { font-size: 13px; max-width: 104px; }
-.compact .spotify-player-artist { font-size: 11px; max-width: 104px; margin-top: 1px; }
-.compact .spotify-player-controls { spacing: 8px; margin-top: 8px; margin-bottom: 6px; }
-.compact .spotify-player-button { width: 24px; height: 28px; }
-.compact .spotify-player-button StIcon { icon-size: 14px; }
-.compact .spotify-player-play { width: 28px; height: 28px; }
-.compact .spotify-player-progress { spacing: 2px; margin-top: 0; }
-.compact .spotify-player-slider { height: 14px; }
-.compact .spotify-player-times { font-size: 10px; }
-.compact .spotify-player-footer { spacing: 4px; margin-top: 4px; }
-.compact .spotify-player-lyrics { font-size: 10px; padding: 4px; }
-.compact .spotify-player-lyrics:checked { background-color: rgba(255,255,255,0.1); }
-.compact .spotify-player-utility { width: 24px; height: 24px; }
+.vertical .spotify-player-controls { margin-top: 6px; margin-bottom: 2px; }
+.vertical .spotify-player-play { width: 46px; height: 46px; border-radius: 23px; }
+.vertical .spotify-player-title { font-weight: bold; }
 
 .spotify-player-source-credits { margin-left: 0; margin-top: 6px; font-size: 10px; }
 

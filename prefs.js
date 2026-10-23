@@ -158,9 +158,16 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
         // --- Player: popup card, pinned card, and the top bar indicator ---
         const playerPage = page('Player', 'multimedia-player-symbolic');
         const playerAppearance = group(playerPage, 'Layout');
-        choice(playerAppearance, 'player-layout', 'Layout', [
-            ['compact', 'Compact'], ['horizontal', 'Horizontal'],
+        const layoutRow = choice(playerAppearance, 'player-layout', 'Layout', [
+            ['vertical', 'Style 1'], ['horizontal', 'Style 2'],
         ]);
+        const describeLayout = () => {
+            layoutRow.subtitle = settings.get_string('player-layout') === 'horizontal'
+                ? 'Controls beside the song, lyrics above or below'
+                : 'Large cover, lyrics beside the player';
+        };
+        describeLayout();
+        signals.push(settings.connect('changed::player-layout', describeLayout));
         spin(playerAppearance, 'player-scale', 'Player size (%)', 70, 150);
 
         const playerLyrics = group(playerPage, 'Lyrics in the player');
@@ -168,15 +175,11 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
         const playerLines = spin(playerLyrics, 'player-lyric-lines', 'Lines', 1, 8);
         const playerWeight = choice(playerLyrics, 'player-lyrics-font-weight', 'Font weight', weights);
         const refreshPlayerLyrics = () => {
-            // The card renders its lyrics list beside the controls, so the rows
-            // only apply to that layout.
-            playerLyrics.sensitive = settings.get_string('player-layout') === 'horizontal';
             playerLines.sensitive = settings.get_boolean('show-player-lyrics');
             playerWeight.sensitive = playerLines.sensitive;
         };
         refreshPlayerLyrics();
-        for (const key of ['player-layout', 'show-player-lyrics'])
-            signals.push(settings.connect(`changed::${key}`, refreshPlayerLyrics));
+        signals.push(settings.connect('changed::show-player-lyrics', refreshPlayerLyrics));
 
         // Liking needs the user's own Spotify app: Spotify's media interface
         // has no library calls, and a shared client ID would be capped.

@@ -3,28 +3,51 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-import { PlayerCard } from './playerCard.js';
+import { PlayerCard, playerLayout } from './playerCard.js';
 import { PlayerArtwork } from './playerArtwork.js';
 import { spotifyTrackId } from './spotifyLibrary.js';
+import { showSpotify } from './spotifyWindow.js';
 
 const LYRICS_GAP = 8;
 
-// Keeps the detached lyric panel against the card's top or bottom edge at its
-// own size. Clutter.SnapConstraint moves a single edge, which stretches the
-// panel instead of moving it.
+// Keeps the detached lyric panel against one edge of the card at its own
+// size. Clutter.SnapConstraint moves a single edge, which stretches the panel
+// instead of moving it.
 const StickToCard = GObject.registerClass(class SpicieStickToCard extends Clutter.Constraint {
     _init(card) {
         super._init();
         this._card = card;
-        this.above = false;
+        this.side = 'below';
+        // Beside the card: line up with its bottom edge instead of its top.
+        this.alignEnd = false;
+    }
+
+    _cardBox() {
+        const card = this._card;
+        if (card.has_allocation()) return card.get_allocation_box();
+        // The card can be waiting for a new layout when the panel is placed,
+        // for example right after a setting restyled or moved it. Skipping
+        // the panel then would leave it at the screen corner, so use the
+        // position the card was given and the size it asks for.
+        if (!card.visible || !card.fixed_position_set) return null;
+        const [, width] = card.get_preferred_width(-1);
+        const [, height] = card.get_preferred_height(width);
+        return new Clutter.ActorBox({x1: card.fixed_x, y1: card.fixed_y,
+            x2: card.fixed_x + width, y2: card.fixed_y + height});
     }
 
     vfunc_update_allocation(_actor, box) {
-        // Before its first layout the card has no box to stick to.
-        if (!this._card.has_allocation()) return;
-        const card = this._card.get_allocation_box();
+        const card = this._cardBox();
+        if (!card) return;
         const [width, height] = [box.get_width(), box.get_height()];
-        box.init_rect(card.x1, this.above ? card.y1 - LYRICS_GAP - height : card.y2 + LYRICS_GAP, width, height);
+        const top = this.alignEnd ? card.y2 - height : card.y1;
+        const [x, y] = {
+            above: [card.x1, card.y1 - LYRICS_GAP - height],
+            below: [card.x1, card.y2 + LYRICS_GAP],
+            left: [card.x1 - LYRICS_GAP - width, top],
+            right: [card.x2 + LYRICS_GAP, top],
+        }[this.side];
+        box.init_rect(x, y, width, height);
     }
 });
 
@@ -37,7 +60,8 @@ export class SpotifyLyricsPopup {
         this._like = {available: false, liked: false, busy: false};
         this._openPrefs = () => { menu.close(); onOpenPrefs(); };
         this._card = new PlayerCard(settings, mpris, this._openPrefs, {
-            onLinkOpened: () => menu.close(), onToggleLike: () => this._toggleLike()});
+            onLinkOpened: () => menu.close(), onToggleLike: () => this._toggleLike(),
+            onOpenSpotify: () => { menu.close(); showSpotify(); }});
         menu.actor.add_style_class_name('spotify-player-popup');
         this._item = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false, style_class: 'spotify-player-menu-item' });
         this._item.add_child(this._card.actor);
@@ -51,6 +75,7 @@ export class SpotifyLyricsPopup {
         for (const key of ['spotify-client-id', 'spotify-refresh-token'])
             this._signals.push(settings.connect(`changed::${key}`, () => this._refreshLike(true)));
         this._monitorSignal = Main.layoutManager.connect('monitors-changed', () => this._positionPinned());
+        this._menuSignal = menu.connect('open-state-changed', (_menu, open) => { if (open) this._placeMenuLyrics(); });
         this._syncPinned();
     }
 
@@ -147,10 +172,7 @@ export class SpotifyLyricsPopup {
     }
 
     _syncPinned() {
-        if (Main.layoutManager.primaryMonitor) {
-            const area = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
-            this._card.setAvailableHeight(area.height - 24);
-        }
+        this._placeMenuLyrics();
         if (!this._settings.get_boolean('player-pinned') || this._available === false) {
             this._finishDrag(false);
             if (this._pinned) {
@@ -165,20 +187,20 @@ export class SpotifyLyricsPopup {
             // The two copies are never shown together.
             this._menu.close();
             this._pinned = new PlayerCard(this._settings, this._mpris, this._openPrefs, {
-                detachLyrics: true, onToggleLike: () => this._toggleLike()});
+                detachLyrics: true, onToggleLike: () => this._toggleLike(), onOpenSpotify: () => showSpotify()});
             this._pinned.setArtwork(this._artwork.value);
             this._pinned.updateMetadata(this._track, this._playing);
             this._pinned.setLyrics(this._lines);
             this._pinned.setLyric(this._lyric);this._pinned.setAttribution(this._attribution);
             this._pinned.setLikeState(this._like);
             // The card is the anchor. Lyrics are a separate actor that sticks
-            // to its top or bottom edge, so lyrics appearing, shrinking or
+            // to one of its edges, so lyrics appearing, shrinking or
             // disappearing between songs never move the controls.
             Main.layoutManager.addChrome(this._pinned.actor, { trackFullscreen: true });
             Main.layoutManager.addChrome(this._pinned.lyricsActor, { trackFullscreen: true });
             this._lyricsStick = new StickToCard(this._pinned.actor);
             this._pinned.lyricsActor.add_constraint(this._lyricsStick);
-            this._lyricsAbove = null;
+            this._lyricsPlace = null;
             this._setupDrag();
             this._pinned.actor.connect('notify::allocation', () => {
                 // The constraint only runs when the panel is laid out.
@@ -189,12 +211,30 @@ export class SpotifyLyricsPopup {
         this._positionPinned();
     }
 
-    _placeLyrics(above) {
-        if (this._lyricsAbove === above) return;
-        this._lyricsAbove = above;
-        this._lyricsStick.above = above;
+    // Style 1 shows lyrics beside the player, on the side of the screen that
+    // has room: to the right of a menu opened on the left half, otherwise to
+    // the left. Style 2 keeps them below the menu.
+    _placeMenuLyrics() {
+        let side = 'below';
+        const monitor = Main.layoutManager.primaryMonitor;
+        if (playerLayout(this._settings) === 'vertical' && monitor) {
+            const [x] = this._menu.sourceActor.get_transformed_position();
+            side = x + this._menu.sourceActor.width / 2 > monitor.x + monitor.width / 2 ? 'left' : 'right';
+        }
+        this._card.setLyricsSide(side);
+        if (monitor) {
+            const area = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+            this._card.setAvailableHeight(area.height - 24);
+        }
+    }
+
+    _placeLyrics(side, alignEnd = false) {
+        if (this._lyricsPlace === `${side}:${alignEnd}`) return;
+        this._lyricsPlace = `${side}:${alignEnd}`;
+        this._lyricsStick.side = side;
+        this._lyricsStick.alignEnd = alignEnd;
         this._pinned.lyricsActor.queue_relayout();
-        this._pinned.setLyricsAbove(above);
+        this._pinned.setLyricsSide(side);
     }
 
     _positionPinned() {
@@ -210,11 +250,19 @@ export class SpotifyLyricsPopup {
         const x = Math.max(area.x, Math.min(area.x + area.width - width, this._settings.get_int('player-x')));
         const y = Math.max(area.y, Math.min(area.y + area.height - height, this._settings.get_int('player-y')));
         if (actor.x !== x || actor.y !== y) actor.set_position(x, y);
-        // Lyrics go where there is more room: below a card in the top half,
-        // above one in the bottom half.
-        const above = y + height / 2 > area.y + area.height / 2;
-        this._placeLyrics(above);
-        this._pinned.setLyricsAvailableHeight(above ? y - area.y - LYRICS_GAP
+        // Lyrics go where there is more room. Style 2: below a card in the
+        // top half, above one in the bottom half. Style 1: beside the card,
+        // toward the middle of the screen, top edges lined up in the top half
+        // and bottom edges in the bottom half.
+        const lower = y + height / 2 > area.y + area.height / 2;
+        if (playerLayout(this._settings) === 'vertical') {
+            const right = x + width / 2 < area.x + area.width / 2;
+            this._placeLyrics(right ? 'right' : 'left', lower);
+            this._pinned.setLyricsAvailableHeight(lower ? y + height - area.y : area.y + area.height - y);
+            return;
+        }
+        this._placeLyrics(lower ? 'above' : 'below');
+        this._pinned.setLyricsAvailableHeight(lower ? y - area.y - LYRICS_GAP
             : area.y + area.height - (y + height) - LYRICS_GAP);
     }
 
@@ -264,6 +312,7 @@ export class SpotifyLyricsPopup {
         this._artwork.destroy();
         this._signals.forEach(id => this._settings.disconnect(id));
         Main.layoutManager.disconnect(this._monitorSignal);
+        this._menu.disconnect(this._menuSignal);
         if (this._pinned) {
             Main.layoutManager.removeChrome(this._pinned.lyricsActor);
             Main.layoutManager.removeChrome(this._pinned.actor);

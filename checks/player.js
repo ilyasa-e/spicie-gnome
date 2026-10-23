@@ -17,7 +17,7 @@ const pause = ms => new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAUL
 }));
 const loop = new GLib.MainLoop(null, false);
 const folder = GLib.dir_make_tmp('spotify-player-test-XXXXXX');
-const artwork = new PlayerArtwork(() => {});
+const artwork = new PlayerArtwork(() => {}, {cacheDir: `${folder}/covers`});
 (async () => {
     check('Time formats milliseconds', formatTime(83000) === '1:23');
     check('Invalid time is safe', formatTime(-1) === '0:00' && formatTime(Infinity) === '0:00');
@@ -38,8 +38,16 @@ const artwork = new PlayerArtwork(() => {});
     for (let i = 0; i < 30 && !artwork.value.gicon; i++) await pause(20);
     const top = artwork.value.palette.top;
     check('Latest song wins over cancelled artwork', artwork.value.gicon !== null && parseInt(top.slice(5, 7), 16) > parseInt(top.slice(1, 3), 16));
+    check('Local artwork is drawn from its own file', artwork.value.uri === `file://${folder}/blue.png`);
+    // Downloaded covers are written to the cache so they can be a rounded background.
+    const bytes = GLib.file_get_contents(`${folder}/red.png`)[1];
+    const stored = await new Promise(resolve => artwork._store('https://example.com/cover', new GLib.Bytes(bytes),
+        new Gio.Cancellable(), resolve));
+    check('Downloaded artwork is kept as a file', stored?.startsWith(`file://${folder}/covers/`) &&
+        Gio.File.new_for_uri(stored).query_exists(null));
     artwork.update('https://');
-    check('Invalid artwork restores neutral cover', artwork.value.gicon === null);
+    check('Invalid artwork restores neutral cover', artwork.value.gicon === null && artwork.value.uri === null);
+    check('The previous song\'s cover file is removed', !Gio.File.new_for_uri(stored).query_exists(null));
     print(`${passed} checks passed`);
 })().catch(error => {
     printerr(error.stack);
@@ -47,6 +55,7 @@ const artwork = new PlayerArtwork(() => {});
 }).finally(() => {
     artwork.destroy();
     for (const name of ['red', 'blue']) Gio.File.new_for_path(`${folder}/${name}.png`).delete(null);
+    try { Gio.File.new_for_path(`${folder}/covers`).delete(null); } catch (_) {}
     Gio.File.new_for_path(folder).delete(null);
     loop.quit();
 });

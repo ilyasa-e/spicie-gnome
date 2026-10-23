@@ -173,12 +173,12 @@
 
     <key name="player-layout" type="s">
       <choices>
-        <choice value="compact"/>
+        <choice value="vertical"/>
         <choice value="horizontal"/>
       </choices>
-      <default>'compact'</default>
+      <default>'vertical'</default>
       <summary>Player layout</summary>
-      <description>Compact places playback controls below song details; Horizontal places them beside the details.</description>
+      <description>Shown as Style 1 and Style 2. Style 1 (vertical) has a large cover above the song details and controls, with lyrics beside the player; Style 2 (horizontal) places the controls beside the details, with lyrics above or below.</description>
     </key>
 
     <key name="player-scale" type="i">
@@ -189,7 +189,7 @@
     <key name="player-lyric-lines" type="i">
       <range min="1" max="8"/>
       <default>4</default>
-      <summary>Number of visible lines in the horizontal player</summary>
+      <summary>Number of visible lines in the player's lyric panel</summary>
     </key>
 
     <key name="player-lyrics-font-weight" type="s">

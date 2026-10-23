@@ -16,12 +16,20 @@ Settings has three tabs.
 
 ## Player
 
-Click the music indicator in the top bar to open the player. Choose a layout in **Settings → Player → Layout**:
+Click the music indicator in the top bar to open the player. Choose a style in **Settings → Player → Layout**:
 
-- **Compact:** a small, nearly square player with a small album cover beside the song details. Playback controls and the seek slider sit below.
-- **Horizontal:** playback controls sit beside the song details.
+- **Style 1 (vertical):** a large rounded album cover on top, then the song
+  title and artist, the seek slider with song times, and previous/play/next
+  with a large play button. Its lyric panel sits beside the player.
+- **Style 2 (horizontal):** a small cover with the song details and the
+  playback controls beside them. Its lyric panel sits above or below the player.
 
-Both layouts include the album cover, previous/play/pause/next controls, a seek slider, and song times. The background colour follows the cover. Missing or failed covers use a neutral background.
+The background colour follows the cover. Missing or failed covers use a neutral background.
+Click the album cover to bring the Spotify window that is playing to the front,
+on its own workspace and restored if it was minimized. If Spotify is running
+without a window (closed to the tray), it is asked to show itself. There is no
+setting for this. On the pinned player a click opens Spotify and a drag moves
+the player.
 Hovering or dragging the seek slider thickens the bar, shows its handle and
 switches it to the cover's accent colour.
 
@@ -31,23 +39,30 @@ While the player is pinned, clicking the top bar indicator brings the pinned
 player forward with a short pulse instead of opening a second copy in a menu.
 When a fullscreen app hides the pinned player, the click opens the menu as
 usual. The saved position belongs to the player card itself: its lyric panel
-attaches above or below it, so songs with more, fewer, or no lyrics never move
-the controls.
+attaches to one of its edges, so songs with more, fewer, or no lyrics never move
+the controls, and changing a setting never separates the two.
 
 **Player size** scales the entire player from 70% to 150%, including text,
 controls, spacing, and its lyric panel. It changes the actual layout size, so
 buttons and dragging continue to match their visible positions.
 
-In **Settings → Player → Lyrics in the player**, enable **Show lyrics** for
-Horizontal and choose one to eight **Lines**. A player near the top places
-lyrics below it; a player near the bottom places lyrics above it. Scroll freely
-and click **Follow song** to return to the current line. When lyrics are off,
-source credits sit below the song controls and above the footer buttons.
-Compact always uses this credit placement.
+In **Settings → Player → Lyrics in the player**, enable **Show lyrics** and
+choose one to eight **Lines**. Both styles have the panel. Style 2 places it
+below a player near the top of the screen and above one near the bottom.
+Style 1 places it beside the player, toward the middle of the screen: to the
+right of a player on the left half and to the left of one on the right half,
+lined up with the player's top edge in the top half of the screen and with its
+bottom edge in the bottom half. In the top bar menu, Style 1 shows the panel on
+the side of the screen that has room. Scroll freely and click **Follow song**
+to return to the current line.
+
+Source credits follow the lyrics: they sit at the bottom of the lyric panel
+while it is shown, and inside the player, above the footer buttons, when the
+panel is off.
 
 ## Lyrics
 
-Lyrics can appear in the top bar, on the desktop, inside the player, or in multiple locations. The top-bar indicator and pinned player appear only while Spotify is available. Choose Left or Right with **Settings → Player → Top bar → Position**. Left places the indicator after the workspace indicator. The top-bar line stays visible between phrases and is cleared when seeking before the first lyric or switching songs. Horizontal layout can show a separate scrolling lyric panel in the popup and pinned player. Compact always keeps lyrics out of the player.
+Lyrics can appear in the top bar, on the desktop, inside the player, or in multiple locations. The top-bar indicator and pinned player appear only while Spotify is available. Choose Left or Right with **Settings → Player → Top bar → Position**. Left places the indicator after the workspace indicator. The top-bar line stays visible between phrases and is cleared when seeking before the first lyric or switching songs. Both player styles can show a separate scrolling lyric panel in the popup and pinned player.
 
 **Settings → Player → Top bar** has separate Artist, Song title, and Lyric line
 switches, plus its own **Font weight**.
