@@ -61,7 +61,7 @@ export class SpotifyLyricsPopup {
         this._openPrefs = () => { menu.close(); onOpenPrefs(); };
         this._card = new PlayerCard(settings, mpris, this._openPrefs, {
             onLinkOpened: () => menu.close(), onToggleLike: () => this._toggleLike(),
-            onOpenSpotify: () => { menu.close(); showSpotify(); }});
+            onOpenSpotify: () => { menu.close(); showSpotify(this._mpris); }});
         menu.actor.add_style_class_name('spotify-player-popup');
         this._item = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false, style_class: 'spotify-player-menu-item' });
         this._item.add_child(this._card.actor);
@@ -187,7 +187,7 @@ export class SpotifyLyricsPopup {
             // The two copies are never shown together.
             this._menu.close();
             this._pinned = new PlayerCard(this._settings, this._mpris, this._openPrefs, {
-                detachLyrics: true, onToggleLike: () => this._toggleLike(), onOpenSpotify: () => showSpotify()});
+                detachLyrics: true, onToggleLike: () => this._toggleLike(), onOpenSpotify: () => showSpotify(this._mpris)});
             this._pinned.setArtwork(this._artwork.value);
             this._pinned.updateMetadata(this._track, this._playing);
             this._pinned.setLyrics(this._lines);

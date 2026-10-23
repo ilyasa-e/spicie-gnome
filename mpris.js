@@ -1,6 +1,7 @@
 /**
  * Spotify MPRIS D-Bus Client for GNOME Shell Extension
- * Connects to org.mpris.MediaPlayer2.spotify on the session bus.
+ * Connects to org.mpris.MediaPlayer2.spotify on the session bus. While the
+ * Spotify app is not running, it follows the Spotify Web Player in a browser.
  *
  * Implements monotonic time position interpolation, defensive variant unpacking,
  * track transition handling, and playback controls.
@@ -9,6 +10,32 @@
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+
+const APP_BUS_NAME = 'org.mpris.MediaPlayer2.spotify';
+
+// Browsers that publish their tabs' media over MPRIS. Chrome, Brave, Edge,
+// Vivaldi and Opera all use the chromium name.
+const BROWSER_BUS_NAME = /^org\.mpris\.MediaPlayer2\.(chromium|firefox|librewolf|zen|floorp|waterfox|plasma-browser-integration)(\.|$)/;
+
+export const isBrowserPlayer = busName => BROWSER_BUS_NAME.test(busName || '');
+
+/**
+ * Whether a browser's media metadata belongs to the Spotify Web Player.
+ * Browsers that share the page address are checked by it. Chromium-based
+ * browsers do not, so there the song must have a title, artist and album,
+ * which the Web Player always sets and video sites usually do not.
+ *
+ * @param {GLib.Variant|object|null} raw MPRIS metadata
+ * @returns {boolean}
+ */
+export function isSpotifyWebMetadata(raw) {
+    const dict = typeof raw?.recursiveUnpack === 'function' ? raw.recursiveUnpack() : raw;
+    if (!dict || typeof dict !== 'object' || Array.isArray(dict)) return false;
+    const url = String(dict['xesam:url'] ?? '').trim();
+    if (url) return /^https:\/\/open\.spotify\.com(\/|$)/.test(url);
+    const track = SpotifyMPRIS.parseMetadata(dict);
+    return Boolean(track.title && track.artist && track.album);
+}
 
 export const SpotifyMPRIS = GObject.registerClass({
     GTypeName: 'SpotifyMPRIS',
@@ -31,7 +58,7 @@ export const SpotifyMPRIS = GObject.registerClass({
         super._init();
 
         let proxy = null;
-        let busName = 'org.mpris.MediaPlayer2.spotify';
+        let busName = APP_BUS_NAME;
         let objectPath = '/org/mpris/MediaPlayer2';
         let autoConnect = true;
         let timeProvider = () => GLib.get_monotonic_time();
@@ -56,7 +83,6 @@ export const SpotifyMPRIS = GObject.registerClass({
         this._playerInterface = 'org.mpris.MediaPlayer2.Player';
 
         this._proxy = null;
-        this._nameOwnerSubId = 0;
         this._propChangedId = 0;
         this._signalId = 0;
         this._nameOwnerId = 0;
@@ -73,6 +99,11 @@ export const SpotifyMPRIS = GObject.registerClass({
         this._rate = 1.0;
         this._rawTrackId = '';
         this._trackPath = '';
+        this._appProxy = null;
+        this._appOwnerId = 0;
+        this._webProxies = new Map();
+        this._webOwnerSubId = 0;
+        this._isWeb = false;
 
         if (proxy) {
             this._attachProxy(proxy, autoConnect);
@@ -91,6 +122,16 @@ export const SpotifyMPRIS = GObject.registerClass({
 
     get rate() {
         return this._rate;
+    }
+
+    /** The MPRIS name of the player being followed. */
+    get busName() {
+        return this._busName;
+    }
+
+    /** Whether the player is the Spotify Web Player in a browser. */
+    get isWeb() {
+        return this._isWeb;
     }
 
     refreshPosition() {
@@ -330,7 +371,106 @@ export const SpotifyMPRIS = GObject.registerClass({
 
     _initDBus() {
         this._setupProxy();
-        this._setupNameWatcher();
+        if (!this._proxy) return;
+        this._appProxy = this._proxy;
+        this._appOwnerId = this._appProxy.connect('notify::g-name-owner', () => this._selectPlayer());
+        this._watchWebPlayers();
+        this._selectPlayer();
+    }
+
+    // Browser players come and go with their media; each gets a proxy whose
+    // changes may make it the one to follow.
+    _watchWebPlayers() {
+        const bus = Gio.DBus.session;
+        this._webOwnerSubId = bus.signal_subscribe('org.freedesktop.DBus', 'org.freedesktop.DBus',
+            'NameOwnerChanged', '/org/freedesktop/DBus', 'org.mpris.MediaPlayer2',
+            Gio.DBusSignalFlags.MATCH_ARG0_NAMESPACE, (_conn, _sender, _path, _iface, _signal, params) => {
+                const [name, , newOwner] = params.deepUnpack();
+                if (!isBrowserPlayer(name)) return;
+                if (newOwner) this._addWebPlayer(name);
+                else this._removeWebPlayer(name);
+            });
+        bus.call('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus', 'ListNames',
+            null, new GLib.VariantType('(as)'), Gio.DBusCallFlags.NONE, -1, this._cancellable, (conn, result) => {
+                let names = [];
+                try { [names] = conn.call_finish(result).deepUnpack(); } catch (_) { return; }
+                names.filter(isBrowserPlayer).forEach(name => this._addWebPlayer(name));
+            });
+    }
+
+    _addWebPlayer(name) {
+        if (this._webProxies.has(name) || !this._cancellable) return;
+        this._webProxies.set(name, null);
+        Gio.DBusProxy.new_for_bus(Gio.BusType.SESSION, Gio.DBusProxyFlags.DO_NOT_AUTO_START, null, name,
+            this._objectPath, this._playerInterface, this._cancellable, (_source, result) => {
+                let proxy;
+                try {
+                    proxy = Gio.DBusProxy.new_for_bus_finish(result);
+                } catch (_) {
+                    if (this._webProxies.get(name) === null) this._webProxies.delete(name);
+                    return;
+                }
+                // The browser may have let the name go meanwhile.
+                if (this._webProxies.get(name) !== null) return;
+                const changedId = proxy.connect('g-properties-changed', () => this._selectPlayer());
+                this._webProxies.set(name, {proxy, changedId});
+                this._selectPlayer();
+            });
+    }
+
+    _removeWebPlayer(name) {
+        const entry = this._webProxies.get(name);
+        this._webProxies.delete(name);
+        if (!entry) return;
+        entry.proxy.disconnect(entry.changedId);
+        if (entry.proxy === this._proxy) this._selectPlayer();
+    }
+
+    // The Spotify app comes first. Otherwise a browser playing the Web Player;
+    // the one already followed keeps its place unless it stops and another
+    // plays.
+    _bestPlayer() {
+        if (this._appProxy?.g_name_owner) return this._appProxy;
+        const playing = proxy => proxy.get_cached_property('PlaybackStatus')?.unpack() === 'Playing';
+        const web = [...this._webProxies.values()]
+            .filter(entry => entry?.proxy.g_name_owner && isSpotifyWebMetadata(entry.proxy.get_cached_property('Metadata')))
+            .map(entry => entry.proxy);
+        if (web.includes(this._proxy) && (playing(this._proxy) || !web.some(playing))) return this._proxy;
+        return web.find(playing) ?? web[0] ?? this._appProxy;
+    }
+
+    _selectPlayer() {
+        const target = this._bestPlayer();
+        if (!target) return;
+        if (target === this._proxy) this._handlePlayerAvailable(Boolean(target.g_name_owner));
+        else this._switchProxy(target);
+    }
+
+    _switchProxy(proxy) {
+        const wasAvailable = this._isAvailable;
+        this._detachProxy();
+        this._attachProxy(proxy, false);
+        this._busName = proxy.g_name;
+        this._isWeb = proxy !== this._appProxy;
+        ++this._positionEpoch;
+        const available = Boolean(proxy.g_name_owner);
+        if (!available || !wasAvailable) {
+            this._handlePlayerAvailable(available);
+            return;
+        }
+        // From one playing source to another: show the new song at once.
+        this._track = null;
+        this._updateMetadata(proxy.get_cached_property('Metadata'));
+        this._updateFromProxy();
+    }
+
+    _detachProxy() {
+        if (!this._proxy) return;
+        for (const key of ['_propChangedId', '_signalId', '_nameOwnerId']) {
+            if (this[key]) this._proxy.disconnect(this[key]);
+            this[key] = 0;
+        }
+        this._proxy = null;
     }
 
     _attachProxy(proxy, autoCheckOwner = true) {
@@ -349,6 +489,11 @@ export const SpotifyMPRIS = GObject.registerClass({
         this._nameOwnerId = this._proxy.connect(
             'notify::g-name-owner',
             () => {
+                // When following browsers too, the app's own watcher decides.
+                if (this._appProxy) {
+                    if (this._proxy !== this._appProxy) this._selectPlayer();
+                    return;
+                }
                 const owner = this._proxy ? this._proxy.g_name_owner : null;
                 this._handlePlayerAvailable(Boolean(owner));
             }
@@ -374,27 +519,6 @@ export const SpotifyMPRIS = GObject.registerClass({
             this._attachProxy(proxy);
         } catch (e) {
             console.error(`[SpotifyMPRIS] Error creating D-Bus proxy: ${e.message}`);
-        }
-    }
-
-    _setupNameWatcher() {
-        try {
-            this._nameOwnerSubId = Gio.DBus.session.signal_subscribe(
-                'org.freedesktop.DBus',
-                'org.freedesktop.DBus',
-                'NameOwnerChanged',
-                '/org/freedesktop/DBus',
-                this._busName,
-                Gio.DBusSignalFlags.NONE,
-                (conn, sender, path, iface, signal, params) => {
-                    const [name, oldOwner, newOwner] = params.recursiveUnpack();
-                    if (name === this._busName) {
-                        this._handlePlayerAvailable(Boolean(newOwner && newOwner !== ''));
-                    }
-                }
-            );
-        } catch (e) {
-            console.error(`[SpotifyMPRIS] Error subscribing to NameOwnerChanged: ${e.message}`);
         }
     }
 
@@ -445,6 +569,9 @@ export const SpotifyMPRIS = GObject.registerClass({
         const statusVariant = this._proxy.get_cached_property('PlaybackStatus');
         const newStatus = statusVariant ? statusVariant.unpack() : 'Stopped';
         this._updatePlaybackStatus(newStatus);
+        // Chromium does not announce position changes, so the cached one
+        // can be old.
+        if (this._isWeb) this.refreshPosition();
     }
 
     _onPropertiesChanged(proxy, changedProperties, invalidatedProperties) {
@@ -482,6 +609,9 @@ export const SpotifyMPRIS = GObject.registerClass({
 
     _updateMetadata(rawMetadata) {
         const newTrack = SpotifyMPRIS.parseMetadata(rawMetadata);
+        // Browser track ids are not Spotify's: Firefox uses one for every
+        // song. Songs are told apart by title and artist instead.
+        if (this._isWeb) newTrack.trackId = '';
         const isDifferentTrack = !this._track ||
             (newTrack.trackId && newTrack.trackId !== this._track.trackId) ||
             (!newTrack.trackId && (newTrack.title !== this._track.title || newTrack.artist !== this._track.artist));
@@ -623,10 +753,18 @@ export const SpotifyMPRIS = GObject.registerClass({
             this._cancellable = null;
         }
 
-        if (this._nameOwnerSubId) {
-            Gio.DBus.session.signal_unsubscribe(this._nameOwnerSubId);
-            this._nameOwnerSubId = 0;
+        if (this._webOwnerSubId) {
+            Gio.DBus.session.signal_unsubscribe(this._webOwnerSubId);
+            this._webOwnerSubId = 0;
         }
+        for (const entry of this._webProxies.values())
+            if (entry) entry.proxy.disconnect(entry.changedId);
+        this._webProxies.clear();
+        if (this._appOwnerId) {
+            this._appProxy.disconnect(this._appOwnerId);
+            this._appOwnerId = 0;
+        }
+        this._appProxy = null;
 
         if (this._proxy) {
             if (this._propChangedId) {

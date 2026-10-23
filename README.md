@@ -18,6 +18,27 @@ Music controls and live lyrics for the Spotify desktop app, without changing Spo
   **Move** can be finished or cancelled.
 - Saving songs to Liked Songs is hidden for now.
 
+## Spotify in a browser
+
+Spicie also works with the Spotify Web Player (open.spotify.com) in Chrome,
+Chromium, Brave, Edge, Vivaldi, Opera, and Firefox and its forks.
+The Spotify app always comes first. While it is not running, Spicie follows the
+browser that plays the Web Player, with the same player, top bar and desktop
+lyrics. There is nothing to set up. If several browsers have it open, the one
+that is playing is followed.
+
+- Clicking the album cover (the song title in Style 3) brings the browser
+  window with the Web Player to the front, and Firefox can also switch to its tab.
+  Chromium-based browsers cannot switch tabs from outside, so the Spotify tab
+  must be the window's open tab to land on it.
+- Firefox tells which site is playing, so only the Web Player is followed.
+  Chromium-based browsers do not, so Spicie follows a browser tab playing a song
+  with a title, artist and album, which the Web Player always provides. A music
+  site that also names albums, such as YouTube Music, may be followed when
+  nothing else is playing; regular videos are not.
+- Word-timed lyrics from Spicy Lyrics need Spotify's track id, which browsers
+  do not share. With the Web Player, lyrics come from LRCLIB.
+
 ## Settings
 
 Settings has three tabs.
@@ -198,9 +219,11 @@ GSETTINGS_BACKEND=memory gjs -m checks/regressions.js
 GSETTINGS_BACKEND=memory gjs -m checks/syllables.js
 GSETTINGS_BACKEND=memory gjs -m checks/view.js
 GSETTINGS_BACKEND=memory gjs -m checks/like.js
+dbus-run-session -- gjs -m checks/web.js
 ```
 
-The player checks cover artwork loading, cancellation when songs change, fallback colours, and time formatting. The player and settings also need a running GNOME session for visual and interaction checks.
+The web checks run fake browser and Spotify players on a private session bus
+and cover which one is followed. The player checks cover artwork loading, cancellation when songs change, fallback colours, and time formatting. The player and settings also need a running GNOME session for visual and interaction checks.
 
 The end-to-end suite lives in `tests/` and runs headless:
 

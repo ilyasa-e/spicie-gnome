@@ -8,6 +8,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 const SPOTIFY_APPS = ['spotify.desktop', 'com.spotify.Client.desktop', 'spotify_spotify.desktop',
     'spotify-launcher.desktop'];
 
+const APP_BUS_NAME = 'org.mpris.MediaPlayer2.spotify';
+
 const isSpotify = text => /spotify/i.test(text || '');
 
 // All workspaces, most recently used first, minimized windows included.
@@ -31,13 +33,54 @@ function raiseOverMpris(busName) {
         });
 }
 
+// Asks the player to show itself when it says it can, and runs otherwise()
+// when it cannot.
+function raiseIfAllowed(busName, otherwise = () => {}) {
+    Gio.DBus.session.call(busName, '/org/mpris/MediaPlayer2', 'org.freedesktop.DBus.Properties', 'Get',
+        new GLib.Variant('(ss)', ['org.mpris.MediaPlayer2', 'CanRaise']), null, Gio.DBusCallFlags.NONE, 2000, null,
+        (connection, result) => {
+            let canRaise = false;
+            try { canRaise = connection.call_finish(result).recursiveUnpack()[0] === true; } catch (_) {}
+            if (canRaise) raiseOverMpris(busName);
+            else otherwise();
+        });
+}
+
+// The browser window of the Web Player: one of the browser's windows, the
+// one titled with the song when the Spotify tab is in front (the Web Player
+// names its tab after the song), or one with Spotify in its title.
+function showWebPlayer(busName, title) {
+    const time = global.get_current_time();
+    Gio.DBus.session.call('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus',
+        'GetConnectionUnixProcessID', new GLib.Variant('(s)', [busName]), new GLib.VariantType('(u)'),
+        Gio.DBusCallFlags.NONE, 2000, null, (connection, result) => {
+            let pid = 0;
+            try { [pid] = connection.call_finish(result).deepUnpack(); } catch (_) {}
+            const all = global.display.get_tab_list(Meta.TabList.NORMAL_ALL, null);
+            // A sandboxed browser may report a different process id than its windows.
+            const own = all.filter(window => window.get_pid() === pid);
+            const windows = own.length ? own : all;
+            const titled = text => text ? windows.find(window => (window.get_title() || '').includes(text)) : null;
+            const window = titled(title) ?? titled('Spotify') ?? (own.length ? own[0] : null);
+            if (window) Main.activateWindow(window, time);
+            // Firefox can also switch to the tab that plays; Chromium cannot.
+            raiseIfAllowed(busName);
+        });
+}
+
 /**
  * Brings the Spotify window that is playing to the front: on its own
- * workspace, unminimized and focused.
+ * workspace, unminimized and focused. For the Web Player, that is the
+ * browser window playing it.
  *
- * @param {string} busName the MPRIS name of the player
+ * @param {object} [player] the followed player (SpotifyMPRIS)
  */
-export function showSpotify(busName = 'org.mpris.MediaPlayer2.spotify') {
+export function showSpotify(player = null) {
+    if (player?.isWeb) {
+        showWebPlayer(player.busName, player.track?.title);
+        return;
+    }
+    const busName = APP_BUS_NAME;
     const window = spotifyWindow();
     if (window) {
         Main.activateWindow(window, global.get_current_time());
@@ -51,14 +94,7 @@ export function showSpotify(busName = 'org.mpris.MediaPlayer2.spotify') {
         return;
     }
     if (app) {
-        Gio.DBus.session.call(busName, '/org/mpris/MediaPlayer2', 'org.freedesktop.DBus.Properties', 'Get',
-            new GLib.Variant('(ss)', ['org.mpris.MediaPlayer2', 'CanRaise']), null, Gio.DBusCallFlags.NONE, 2000, null,
-            (connection, result) => {
-                let canRaise = false;
-                try { canRaise = connection.call_finish(result).recursiveUnpack()[0] === true; } catch (_) {}
-                if (canRaise) raiseOverMpris(busName);
-                else app.activate();
-            });
+        raiseIfAllowed(busName, () => app.activate());
         return;
     }
     raiseOverMpris(busName);
