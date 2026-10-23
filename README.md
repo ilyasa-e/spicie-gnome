@@ -2,6 +2,22 @@
 
 Music controls and live lyrics for the Spotify desktop app, without changing Spotify itself.
 
+## What's new in 2.1
+
+- Three player styles: **Style 1** with a large cover, **Style 2** with the
+  controls beside the song, and the new **Style 3**, a small card without a cover.
+- Click the album cover (the song title in Style 3) to bring Spotify to the front.
+- In Styles 1 and 3 the lyric panel sits beside the player, and it stays
+  attached to the pinned player when lyric settings change.
+- Source credits show inside the player when its lyric panel is off.
+- Separate font weights for the player lyrics, desktop lyrics and top bar.
+- The seek bar grows and shows its handle on hover.
+- The pinned player no longer opens a second copy from the top bar; it pulses
+  instead.
+- Desktop lyrics no longer freeze, catch up right away on the next song, and
+  **Move** can be finished or cancelled.
+- Saving songs to Liked Songs is hidden for now.
+
 ## Settings
 
 Settings has three tabs.
@@ -16,32 +32,65 @@ Settings has three tabs.
 
 ## Player
 
-Click the music indicator in the top bar to open the player. Choose a layout in **Settings → Player → Layout**:
+Click the music indicator in the top bar to open the player. Choose a style in **Settings → Player → Layout**:
 
-- **Compact:** a small, nearly square player with a small album cover beside the song details. Playback controls and the seek slider sit below.
-- **Horizontal:** playback controls sit beside the song details.
+- **Style 1 (vertical):** a narrow card with a rounded album cover on top, then
+  the song title and artist with the pin button, the seek slider with song
+  times, and one playback row: the desktop lyrics toggle, previous, a large play
+  button, next and Settings. Its lyric panel sits beside the player.
+- **Style 2 (horizontal):** a small cover with the song details and the
+  playback controls beside them. Its lyric panel sits above or below the player.
+- **Style 3 (minimal):** the simplest and smallest card, with no cover: the song
+  title and artist, one playback row with a large play button (the desktop
+  lyrics toggle and Settings at its ends), and a thin seek bar without times.
+  Its lyric panel sits beside the player.
 
-Both layouts include the album cover, previous/play/pause/next controls, a seek slider, and song times. The background colour follows the cover. Missing or failed covers use a neutral background.
+The background colour follows the cover. Missing or failed covers use a neutral background.
+Click the album cover to bring the Spotify window that is playing to the front,
+on its own workspace and restored if it was minimized. If Spotify is running
+without a window (closed to the tray), it is asked to show itself. There is no
+setting for this. Style 3 has no cover, so click its song title instead. On
+the pinned player a click opens Spotify and a drag moves the player.
+Hovering or dragging the seek slider thickens the bar, shows its handle and
+switches it to the cover's accent colour.
 
 Use the pin button or **Keep player on desktop** to keep the player visible. Drag its cover, title, or empty background to move it. The position is saved separately from desktop lyrics. **Player position → Reset** moves it back to the starting position. Fullscreen apps hide the pinned player.
+
+While the player is pinned, clicking the top bar indicator brings the pinned
+player forward with a short pulse instead of opening a second copy in a menu.
+When a fullscreen app hides the pinned player, the click opens the menu as
+usual. The saved position belongs to the player card itself: its lyric panel
+attaches to one of its edges, so songs with more, fewer, or no lyrics never move
+the controls, and changing a setting never separates the two.
 
 **Player size** scales the entire player from 70% to 150%, including text,
 controls, spacing, and its lyric panel. It changes the actual layout size, so
 buttons and dragging continue to match their visible positions.
 
-In **Settings → Player → Lyrics in the player**, enable **Show lyrics** for
-Horizontal and choose one to eight **Lines**. A player near the top places
-lyrics below it; a player near the bottom places lyrics above it. Scroll freely
-and click **Follow song** to return to the current line. When lyrics are off,
-source credits sit below the song controls and above the footer buttons.
-Compact always uses this credit placement.
+In **Settings → Player → Lyrics in the player**, enable **Show lyrics** and
+choose one to eight **Lines**. All styles have the panel. Style 2 places it
+below a player near the top of the screen and above one near the bottom.
+Styles 1 and 3 place it beside the player, toward the middle of the screen: to the
+right of a player on the left half and to the left of one on the right half,
+lined up with the player's top edge in the top half of the screen and with its
+bottom edge in the bottom half. In the top bar menu, Styles 1 and 3 show the panel on
+the side of the screen that has room. Scroll freely and click **Follow song**
+to return to the current line.
+
+Source credits follow the lyrics: they sit at the bottom of the lyric panel
+while it is shown, and inside the player, above the footer buttons, when the
+panel is off.
 
 ## Lyrics
 
-Lyrics can appear in the top bar, on the desktop, inside the player, or in multiple locations. The top-bar indicator and pinned player appear only while Spotify is available. Choose Left or Right with **Settings → Player → Top bar → Position**. Left places the indicator after the workspace indicator. The top-bar line stays visible between phrases and is cleared when seeking before the first lyric or switching songs. Horizontal layout can show a separate scrolling lyric panel in the popup and pinned player. Compact always keeps lyrics out of the player.
+Lyrics can appear in the top bar, on the desktop, inside the player, or in multiple locations. The top-bar indicator and pinned player appear only while Spotify is available. Choose Left or Right with **Settings → Player → Top bar → Position**. Left places the indicator after the workspace indicator. The top-bar line stays visible between phrases and is cleared when seeking before the first lyric or switching songs. Both player styles can show a separate scrolling lyric panel in the popup and pinned player.
 
 **Settings → Player → Top bar** has separate Artist, Song title, and Lyric line
-switches. Selected fields use ` | ` between them; empty or hidden fields leave
+switches, plus its own **Font weight**.
+Desktop lyrics (**Desktop lyrics → Text and background**) and the player's lyric
+panel (**Player → Lyrics in the player**) each have a **Font weight** too:
+Light, Regular, Medium, Semibold, Bold, or Heavy. Fonts without that weight
+use the nearest one available. Selected fields use ` | ` between them; empty or hidden fields leave
 no extra separators. Turning all three off keeps the playback button. The player
 shows source details when opened, even with player lyrics off. The top bar
 shows only the selected song fields; source credits stay in the player and
@@ -60,7 +109,7 @@ The default screen position is **Top center**, below the top bar. Top left, Top 
 
 **Desktop text alignment** is separate from screen position: choose Left, Center, Right, or **By vocalist**. By vocalist uses the source's `OppositeAligned` flag to place voices on the left or right, including overlapping lead vocals. Without that flag, text stays centered. Manual alignment applies to all voices. The same window handles normal and animated lyrics. Transparent draws no background.
 
-Turn on **Let clicks pass through** to interact with the app behind the lyrics. Use **Move lyrics → Move** to turn click-through off and drag the lyrics again. The first lyric is visible while waiting, without early karaoke highlighting.
+Turn on **Let clicks pass through** to interact with the app behind the lyrics. **Move lyrics → Move** outlines the lyrics and lets you drag them even while click-through is on; click **Done** (or close Settings) to finish. Click-through keeps its own setting and comes back unchanged. The first lyric is visible while waiting, without early karaoke highlighting.
 
 In **Settings → Desktop lyrics → Overlay**, the **Lines** row selects one to
 eight lyric lines (two by default). With two, the active lyric is first and the next line is below it.
@@ -78,12 +127,18 @@ The countdown is a row in the lyric sequence, before the next vocal. The first
 lyric is already visible below it during an intro. Existing rows scroll smoothly
 when focus advances; seeking rebuilds the view immediately.
 
+When the song changes, the previous song's lyrics are hidden at once. The
+window keeps its size until the new lyrics arrive instead of collapsing and
+growing back.
+
 Floating LRCLIB credits appear with the final lyric and remain at the end. For
 responses from the Spicy Lyrics API, including Apple Music, a small source line
 and any required contributor links remain visible whenever lyrics are shown.
 Community credits show uploader and maker names inline, with underlined links
 from the response. They wrap when space is limited; role labels and the Spicy
 Lyrics name are omitted from the credit display. Source metadata stays intact.
+In the player, linked credits (contributor profiles and LRCLIB) show a hand
+cursor and a highlight on hover; opening one closes the popup.
 
 **Animate lyrics** controls highlighting:
 
@@ -142,6 +197,7 @@ GSETTINGS_BACKEND=memory gjs -m checks/presentation.js
 GSETTINGS_BACKEND=memory gjs -m checks/regressions.js
 GSETTINGS_BACKEND=memory gjs -m checks/syllables.js
 GSETTINGS_BACKEND=memory gjs -m checks/view.js
+GSETTINGS_BACKEND=memory gjs -m checks/like.js
 ```
 
 The player checks cover artwork loading, cancellation when songs change, fallback colours, and time formatting. The player and settings also need a running GNOME session for visual and interaction checks.

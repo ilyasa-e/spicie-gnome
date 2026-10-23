@@ -45,6 +45,11 @@ cp "${SCRIPT_DIR}/karaokeLayout.js" "${TARGET_DIR}/"
 cp "${SCRIPT_DIR}/romanizer.js" "${TARGET_DIR}/"
 cp "${SCRIPT_DIR}/prefs.js" "${TARGET_DIR}/"
 cp "${SCRIPT_DIR}/lyricsPreview.js" "${TARGET_DIR}/"
+cp "${SCRIPT_DIR}/fontWeight.js" "${TARGET_DIR}/"
+cp "${SCRIPT_DIR}/spotifyLibrary.js" "${TARGET_DIR}/"
+cp "${SCRIPT_DIR}/spotifyAuth.js" "${TARGET_DIR}/"
+cp "${SCRIPT_DIR}/spotifyWindow.js" "${TARGET_DIR}/"
+cp -r "${SCRIPT_DIR}/icons" "${TARGET_DIR}/"
 
 # Copy binary helpers (Smooth Standalone HUD)
 mkdir -p "${TARGET_DIR}/bin"

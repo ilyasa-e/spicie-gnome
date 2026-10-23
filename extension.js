@@ -13,6 +13,7 @@ import { lyricAttribution } from './lyricsAttribution.js';
 import { fetchTrackLyrics, LYRICS_SETTINGS } from './lyricsRequest.js';
 import { floatingPosition, isLyricsWindow, hideLyricsWindowFromLists } from './lyricsPresentation.js';
 import { recoveryDelayMs } from './hudLifecycle.js';
+import { SpotifyLibrary, LIKE_SONGS_ENABLED } from './spotifyLibrary.js';
 
 const wait = ms => new Promise(resolve => {
     GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.max(1, ms), () => {
@@ -24,16 +25,21 @@ const wait = ms => new Promise(resolve => {
 export default class SpotifyFloatingLyricsExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
+        // A Move left active by a closed or crashed preferences window.
+        this._settings.set_boolean('floating-moving', false);
 
         // 1. Core Services
         this._mpris = new SpotifyMPRIS();
         this._lyricsProvider = new LyricsProvider();
         this._sync = new LyricsSync();
+        this._library = LIKE_SONGS_ENABLED ? new SpotifyLibrary(this._settings) : null;
 
         // 2. Standalone Smooth HUD Process & Window State
         this._hudSubprocess = null;
         this._hudWaylandClient = null;
         this._hudStdinStream = null;
+        this._hudQueue = [];
+        this._hudWriting = false;
         this._hudExpectedExit = false;
         this._hudSpawnUs = 0;
         this._hudRapidExits = 0;
@@ -56,8 +62,12 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             this._indicator.menu,
             this._settings,
             this._mpris,
-            () => this.openPreferences()
+            () => this.openPreferences(),
+            this._library
         );
+        // With the player pinned, the top bar button focuses it instead of
+        // opening a duplicate player in a menu.
+        this._indicator.setActivateHandler(() => this._popup.focusPinned());
 
 
 
@@ -237,6 +247,8 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             } else this._hudSubprocess = launcher.spawnv([exePath]);
             launcher.close();
             this._hudStdinStream = this._hudSubprocess.get_stdin_pipe();
+            this._hudQueue = [];
+            this._hudWriting = false;
 
             this._hudSubprocess.wait_check_async(null, (_proc, res) => {
                 try {
@@ -300,6 +312,8 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             } catch (e) {}
             this._hudStdinStream = null;
         }
+        this._hudQueue = [];
+        this._hudWriting = false;
 
         if (this._hudSubprocess) {
             try {
@@ -310,27 +324,46 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._hudWaylandClient = null;
     }
 
+    // GIO allows one outstanding write per stream: a second write_bytes_async
+    // issued before the first completes fails with "Stream has outstanding
+    // operation". Lyrics followed by a clock sync in the same tick used to hit
+    // that, the failure was taken for a dead pipe, and the window never heard
+    // from the extension again. Messages are queued and written in order; only
+    // the newest clock sync is worth sending.
     _sendHUDMessage(msg) {
         if (!this._hudStdinStream) return;
-        try {
-            if (msg.type === 'sync') msg = { ...msg, sampleTimeUs: GLib.get_monotonic_time(), rate: this._mpris?.rate || 1 };
-            const text = JSON.stringify(msg) + '\n';
-            const bytes = new GLib.Bytes(new TextEncoder().encode(text));
-            const stream = this._hudStdinStream;
-            stream.write_bytes_async(bytes, GLib.PRIORITY_DEFAULT, null, (target, res) => {
-                try {
-                    target.write_bytes_finish(res);
-                } catch (e) {
-                    // A closed pipe means the window is gone even though the
-                    // process handle still looks alive. Reconnect it.
-                    if (this._hudExpectedExit || this._hudStdinStream !== target) return;
-                    this._hudStdinStream = null;
-                    this._scheduleHUDReconcile(500);
-                }
-            });
-        } catch (e) {
-            // Stream may have closed
+        if (msg.type === 'sync') {
+            msg = { ...msg, sampleTimeUs: GLib.get_monotonic_time(), rate: this._mpris?.rate || 1 };
+            this._hudQueue = this._hudQueue.filter(queued => queued.type !== 'sync');
         }
+        this._hudQueue.push(msg);
+        this._flushHUDQueue();
+    }
+
+    _flushHUDQueue() {
+        const stream = this._hudStdinStream;
+        if (!stream || this._hudWriting || !this._hudQueue.length) return;
+        const text = this._hudQueue.map(msg => `${JSON.stringify(msg)}\n`).join('');
+        this._hudQueue = [];
+        this._hudWriting = true;
+        // write_all: a long word-timed song is larger than one pipe buffer,
+        // and a partial write would cut a JSON line in half.
+        stream.write_all_async(new TextEncoder().encode(text), GLib.PRIORITY_DEFAULT, null, (target, res) => {
+            if (this._hudStdinStream !== target) return;
+            this._hudWriting = false;
+            try {
+                target.write_all_finish(res);
+            } catch (e) {
+                if (this._hudExpectedExit) return;
+                // The window stopped reading. Replace it: a process that can
+                // no longer be updated would show a frozen lyric forever.
+                this._hudStdinStream = null;
+                this._hudQueue = [];
+                try { this._hudSubprocess?.force_exit(); } catch (_) {}
+                return;
+            }
+            this._flushHUDQueue();
+        });
     }
 
     // Re-reads Spotify's own position and pushes it to every surface. Used
@@ -481,6 +514,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._lyricsRequestId = requestId;
         this._setLyricsAttribution(null);
         if (!track || !track.title) {
+            this._lyricsTrackKey = null;
             this._indicator.updateLyric('');
             this._popup.setLyrics([]);
             this._sync.setLyrics([]);
@@ -494,14 +528,26 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         }
 
         const isPlaying = this._mpris.playbackStatus === 'Playing';
+        // Spotify announces a new song slightly after it starts; read its real
+        // position now instead of waiting for the next periodic refresh.
+        this._refreshPositionAndSync();
         this._indicator.updatePlayback(isPlaying, track);
         this._popup.updateMetadata(track, isPlaying);
 
-        // Keep the previous lyrics on screen while the next set loads. Clearing
-        // here blanks the floating window (and collapses it to an empty strip)
-        // for the whole fetch, which reads as "the HUD disappeared".
         const title = track.title || '';
         const artist = track.artist || '';
+        // The previous song's lyrics must not run against the new song's
+        // clock. Hide them, but tell the window the next set is on its way so
+        // it keeps its size instead of collapsing to an empty strip. A refetch
+        // of the same song (a changed source setting) keeps them on screen.
+        const trackKey = track.trackId || `${title}\n${artist}`;
+        if (trackKey !== this._lyricsTrackKey) {
+            this._lyricsTrackKey = trackKey;
+            this._sync.setLyrics([]);
+            this._popup.setLyrics([]);
+            this._indicator.updateLyric('');
+            this._sendHUDMessage({ type: 'lyrics', title, artist, lines: [], pending: true });
+        }
 
         try {
             const res = await this._fetchLyrics(track, requestId);
@@ -663,7 +709,11 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             this._popup = null;
         }
 
+        this._library?.destroy();
+        this._library = null;
+
         if (this._indicator) {
+            this._indicator.setActivateHandler(null);
             this._indicator.destroy();
             this._indicator = null;
         }

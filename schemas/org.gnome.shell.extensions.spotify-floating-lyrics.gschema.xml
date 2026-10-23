@@ -55,6 +55,12 @@
       <description>Disable pointer events on the floating overlay so mouse clicks pass through to windows beneath.</description>
     </key>
 
+    <key name="floating-moving" type="b">
+      <default>false</default>
+      <summary>Desktop lyrics are being moved</summary>
+      <description>Set by the Move button in the preferences. Accepts the pointer and outlines the lyrics until Done is pressed, without changing click-through.</description>
+    </key>
+
     <key name="floating-position" type="s">
       <choices>
         <choice value="top-center"/>
@@ -101,6 +107,19 @@
       <default>'Sans'</default>
       <summary>Lyrics font family</summary>
       <description>Font family for rendering synced lyrics in the floating HUD.</description>
+    </key>
+
+    <key name="font-weight" type="s">
+      <choices>
+        <choice value="light"/>
+        <choice value="regular"/>
+        <choice value="medium"/>
+        <choice value="semibold"/>
+        <choice value="bold"/>
+        <choice value="heavy"/>
+      </choices>
+      <default>'bold'</default>
+      <summary>Desktop lyrics font weight</summary>
     </key>
 
     <key name="font-size" type="i">
@@ -154,12 +173,13 @@
 
     <key name="player-layout" type="s">
       <choices>
-        <choice value="compact"/>
+        <choice value="vertical"/>
         <choice value="horizontal"/>
+        <choice value="minimal"/>
       </choices>
-      <default>'compact'</default>
+      <default>'vertical'</default>
       <summary>Player layout</summary>
-      <description>Compact places playback controls below song details; Horizontal places them beside the details.</description>
+      <description>Shown as Style 1, Style 2 and Style 3. Style 1 (vertical) has a large cover above the song details and controls, with lyrics beside the player; Style 2 (horizontal) places the controls beside the details, with lyrics above or below; Style 3 (minimal) has no cover, only the song details, a large play button and a seek bar, with lyrics beside the player.</description>
     </key>
 
     <key name="player-scale" type="i">
@@ -170,7 +190,45 @@
     <key name="player-lyric-lines" type="i">
       <range min="1" max="8"/>
       <default>4</default>
-      <summary>Number of visible lines in the horizontal player</summary>
+      <summary>Number of visible lines in the player's lyric panel</summary>
+    </key>
+
+    <key name="player-lyrics-font-weight" type="s">
+      <choices>
+        <choice value="light"/>
+        <choice value="regular"/>
+        <choice value="medium"/>
+        <choice value="semibold"/>
+        <choice value="bold"/>
+        <choice value="heavy"/>
+      </choices>
+      <default>'regular'</default>
+      <summary>Player lyrics font weight</summary>
+    </key>
+
+    <key name="panel-font-weight" type="s">
+      <choices>
+        <choice value="light"/>
+        <choice value="regular"/>
+        <choice value="medium"/>
+        <choice value="semibold"/>
+        <choice value="bold"/>
+        <choice value="heavy"/>
+      </choices>
+      <default>'semibold'</default>
+      <summary>Top bar text font weight</summary>
+    </key>
+
+    <key name="spotify-client-id" type="s">
+      <default>''</default>
+      <summary>Spotify app client ID</summary>
+      <description>Client ID of the user's own Spotify app, used to like songs from the player.</description>
+    </key>
+
+    <key name="spotify-refresh-token" type="s">
+      <default>''</default>
+      <summary>Spotify refresh token</summary>
+      <description>Issued when the Spotify account is connected. Cleared by disconnecting.</description>
     </key>
 
     <key name="player-pinned" type="b">

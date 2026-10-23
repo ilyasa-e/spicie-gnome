@@ -1,17 +1,22 @@
 const PROVIDERS = { spicy_lyrics: 'Spicy Lyrics', apple_music: 'Apple Music', spotify: 'Spotify',
     lrclib: 'LRCLIB', lrclib_search: 'LRCLIB' };
+// Only open, community-run sources get a link; commercial catalogues do not
+// have a page for the song that the extension could honestly point to.
+const PROVIDER_URLS = { lrclib: 'https://lrclib.net', lrclib_search: 'https://lrclib.net' };
+const webUrl = value => /^https?:\/\/[^\s]+$/i.test(String(value || '')) ? String(value) : null;
 
 export function lyricAttribution(result) {
     if (!result?.lines?.length) return null;
     const source = result.provider === 'spicy_lyrics' ? result.source : result.provider;
     const attribution = { provider: PROVIDERS[source] || source || 'Unknown source', contributors: [],
-        alwaysVisible: result.provider === 'spicy_lyrics' };
+        providerUrl: PROVIDER_URLS[source] || null, alwaysVisible: result.provider === 'spicy_lyrics' };
     if (source === 'spicy_lyrics') {
         for (const role of ['Uploader', 'Maker']) {
             const person = result.uploadAttribution?.[role];
-            const name = String(person?.username || person?.id || '').trim();
+            // Accept the field spellings the service has used for profiles.
+            const name = String(person?.username || person?.displayName || person?.name || person?.id || '').trim();
             if (!name) continue;
-            const url = /^https?:\/\/[^\s]+$/i.test(person.url || '') ? person.url : null;
+            const url = webUrl(person.url) || webUrl(person.profileUrl) || webUrl(person.link);
             attribution.contributors.push({ role, name, url });
         }
     }
@@ -30,11 +35,10 @@ export function creditItems(attribution) {
     if (!attribution) return [];
     const provider = String(attribution.provider || '').trim();
     const items = provider && !/^spicy[ _-]?lyrics$/i.test(provider)
-        ? [{name: provider, url: null, role: ''}] : [];
+        ? [{name: provider, url: webUrl(attribution.providerUrl), role: ''}] : [];
     for (const person of attribution.contributors || []) {
         const name = String(person.name || '').trim();
-        if (name) items.push({name, role: person.role || '',
-            url: /^https?:\/\/[^\s]+$/i.test(person.url || '') ? person.url : null});
+        if (name) items.push({name, role: person.role || '', url: webUrl(person.url)});
     }
     return items;
 }

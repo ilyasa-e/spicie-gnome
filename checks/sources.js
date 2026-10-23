@@ -32,6 +32,9 @@ const pause = ms => new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAUL
     const unsafe = lyricAttribution({...first,uploadAttribution:{Uploader:{username:'Name',url:'javascript:alert(1)'}}});
     check('Non-web contributor links are not opened', unsafe.contributors[0].url === null);
     check('Other sources still show their provider name', attributionMarkup(lyricAttribution({...first,source:'apple_music'})) === 'Apple Music');
+    check('LRCLIB credit links to the open database', attributionMarkup(lyricAttribution({provider:'lrclib',lines:first.lines})) === '<a href="https://lrclib.net"><u>LRCLIB</u></a>');
+    const profile = lyricAttribution({...first,uploadAttribution:{Maker:{displayName:'Maker',profileUrl:'https://spicylyrics.org/m'}}});
+    check('Contributor profiles under other field names stay clickable', profile.contributors[0].name === 'Maker' && profile.contributors[0].url === 'https://spicylyrics.org/m');
     check('Commercial sources do not inherit community credits', lyricAttribution({...first,source:'apple_music'}).contributors.length === 0);
     check('Apple Music is named as the actual provider', lyricAttribution({...first,source:'apple_music'}).provider === 'Apple Music');
     check('Missing source is not claimed as Spicy Lyrics', lyricAttribution({...first,source:null}).provider === 'Unknown source');
