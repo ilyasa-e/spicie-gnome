@@ -2,6 +2,22 @@
 
 Music controls and live lyrics for the Spotify desktop app, without changing Spotify itself.
 
+## What's new in 2.1
+
+- Three player styles: **Style 1** with a large cover, **Style 2** with the
+  controls beside the song, and the new **Style 3**, a small card without a cover.
+- Click the album cover (the song title in Style 3) to bring Spotify to the front.
+- In Styles 1 and 3 the lyric panel sits beside the player, and it stays
+  attached to the pinned player when lyric settings change.
+- Source credits show inside the player when its lyric panel is off.
+- Separate font weights for the player lyrics, desktop lyrics and top bar.
+- The seek bar grows and shows its handle on hover.
+- The pinned player no longer opens a second copy from the top bar; it pulses
+  instead.
+- Desktop lyrics no longer freeze, catch up right away on the next song, and
+  **Move** can be finished or cancelled.
+- Saving songs to Liked Songs is hidden for now.
+
 ## Settings
 
 Settings has three tabs.

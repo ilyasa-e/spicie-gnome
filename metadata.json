@@ -12,5 +12,6 @@
   ],
   "url": "https://github.com/ilyasa-e/spicie-gnome",
   "gettext-domain": "spotify-floating-lyrics",
-  "version": 2
+  "version": 3,
+  "version-name": "2.1"
 }
