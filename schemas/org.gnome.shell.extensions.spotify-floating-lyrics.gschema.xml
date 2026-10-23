@@ -55,6 +55,12 @@
       <description>Disable pointer events on the floating overlay so mouse clicks pass through to windows beneath.</description>
     </key>
 
+    <key name="floating-moving" type="b">
+      <default>false</default>
+      <summary>Desktop lyrics are being moved</summary>
+      <description>Set by the Move button in the preferences. Accepts the pointer and outlines the lyrics until Done is pressed, without changing click-through.</description>
+    </key>
+
     <key name="floating-position" type="s">
       <choices>
         <choice value="top-center"/>

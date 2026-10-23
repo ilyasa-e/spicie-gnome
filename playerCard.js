@@ -97,7 +97,9 @@ export class PlayerCard {
         this._times.add_child(this._total);
         this._lyricPanel = new PlayerLyrics(settings, () => this._mpris.getPositionMs(), onLinkOpened);
         this._lyricBox = this._lyricPanel.actor;
-        if (detachLyrics) this.lyricsActor = this._lyricBox;
+        // Chrome that tracks fullscreen has its visibility set by the shell, so
+        // a detached panel lives in a holder and hides itself inside it.
+        if (detachLyrics) this.lyricsActor = new St.Bin({child: this._lyricBox});
         else this.actor.add_child(this._lyricBox);
         this._credits = new SourceCredits(onLinkOpened);
         this._credits.actor.add_style_class_name('spotify-player-source-credits');
@@ -342,6 +344,7 @@ export class PlayerCard {
         this._signals.forEach(id => this._settings.disconnect(id));
         this._lyricPanel.destroy();
         this.actor.destroy();
+        this.lyricsActor?.destroy();
         this.lyricsActor = null;
     }
 }

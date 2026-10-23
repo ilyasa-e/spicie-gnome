@@ -34,23 +34,6 @@ usual. The saved position belongs to the player card itself: its lyric panel
 attaches above or below it, so songs with more, fewer, or no lyrics never move
 the controls.
 
-### Like songs
-
-Spotify's media interface has no library calls, so the heart button uses the
-Spotify Web API with your own Spotify app. In **Settings → Player → Like
-songs**:
-
-1. Open the Spotify app dashboard and create an app with the Web API.
-2. Add the shown redirect URI, `http://127.0.0.1:8898/callback`, to the app.
-3. Paste the app's client ID and click **Connect**, then approve access in the
-   browser.
-
-The heart then appears beside the song details and shows whether the song is in
-your Liked Songs. Spicie asks only for the `user-library-read` and
-`user-library-modify` scopes, uses PKCE (no client secret), and stores the
-refresh token in local GNOME settings. **Disconnect** removes it. Spotify
-requires the app owner to have Premium for apps in development mode.
-
 **Player size** scales the entire player from 70% to 150%, including text,
 controls, spacing, and its lyric panel. It changes the actual layout size, so
 buttons and dragging continue to match their visible positions.
@@ -90,7 +73,7 @@ The default screen position is **Top center**, below the top bar. Top left, Top 
 
 **Desktop text alignment** is separate from screen position: choose Left, Center, Right, or **By vocalist**. By vocalist uses the source's `OppositeAligned` flag to place voices on the left or right, including overlapping lead vocals. Without that flag, text stays centered. Manual alignment applies to all voices. The same window handles normal and animated lyrics. Transparent draws no background.
 
-Turn on **Let clicks pass through** to interact with the app behind the lyrics. Use **Move lyrics → Move** to turn click-through off and drag the lyrics again. The first lyric is visible while waiting, without early karaoke highlighting.
+Turn on **Let clicks pass through** to interact with the app behind the lyrics. **Move lyrics → Move** outlines the lyrics and lets you drag them even while click-through is on; click **Done** (or close Settings) to finish. Click-through keeps its own setting and comes back unchanged. The first lyric is visible while waiting, without early karaoke highlighting.
 
 In **Settings → Desktop lyrics → Overlay**, the **Lines** row selects one to
 eight lyric lines (two by default). With two, the active lyric is first and the next line is below it.

@@ -5,7 +5,7 @@ import Pango from 'gi://Pango';
 import { createLyricsPreview } from './lyricsPreview.js';
 import { panelText } from './lyricsView.js';
 import { FONT_WEIGHTS } from './fontWeight.js';
-import { SPOTIFY_REDIRECT_URI } from './spotifyLibrary.js';
+import { SPOTIFY_REDIRECT_URI, LIKE_SONGS_ENABLED } from './spotifyLibrary.js';
 import { connectSpotify } from './spotifyAuth.js';
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
@@ -110,12 +110,20 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
         ]);
         // Moving the window is a placement action, so the command lives here.
         const moveLyrics = new Adw.ActionRow({ title: 'Move lyrics' });
-        const moveButton = new Gtk.Button({ label: 'Move', valign: Gtk.Align.CENTER });
+        const moveButton = new Gtk.Button({ valign: Gtk.Align.CENTER });
+        const refreshMove = () => {
+            const moving = settings.get_boolean('floating-moving');
+            moveButton.label = moving ? 'Done' : 'Move';
+            moveButton.css_classes = moving ? ['suggested-action'] : [];
+            moveLyrics.subtitle = moving ? 'Drag the outlined lyrics on the desktop, then click Done' : '';
+        };
         moveButton.connect('clicked', () => {
-            settings.set_boolean('show-floating', true);
-            settings.set_boolean('floating-click-passthrough', false);
-            window.add_toast(new Adw.Toast({ title: 'Drag the lyrics to move them.' }));
+            const moving = !settings.get_boolean('floating-moving');
+            if (moving) settings.set_boolean('show-floating', true);
+            settings.set_boolean('floating-moving', moving);
         });
+        signals.push(settings.connect('changed::floating-moving', refreshMove));
+        refreshMove();
         moveLyrics.add_suffix(moveButton);moveLyrics.activatable_widget = moveButton;placement.add(moveLyrics);
         resetRow(placement, 'Reset placement', ['floating-position', 'floating-x', 'floating-y', 'lyrics-alignment']);
 
@@ -172,53 +180,55 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
 
         // Liking needs the user's own Spotify app: Spotify's media interface
         // has no library calls, and a shared client ID would be capped.
-        const likes = group(playerPage, 'Like songs');
-        likes.description = 'Shows a heart in the player. Create a Spotify app, add the redirect URI below to it, then paste its client ID.';
-        const spotifyId = new Adw.EntryRow({ title: 'Spotify client ID', text: settings.get_string('spotify-client-id') });
-        spotifyId.connect('changed', () => {
-            const value = spotifyId.text.trim();
-            if (value === settings.get_string('spotify-client-id')) return;
-            settings.set_string('spotify-client-id', value);
-            // A token belongs to the app that issued it.
-            settings.set_string('spotify-refresh-token', '');
-        });
-        likes.add(spotifyId);
-        const redirect = new Adw.ActionRow({ title: 'Redirect URI', subtitle: SPOTIFY_REDIRECT_URI, subtitle_selectable: true });
-        const copy = new Gtk.Button({ icon_name: 'edit-copy-symbolic', valign: Gtk.Align.CENTER,
-            tooltip_text: 'Copy', css_classes: ['flat'] });
-        copy.connect('clicked', () => {
-            copy.get_clipboard().set(SPOTIFY_REDIRECT_URI);
-            window.add_toast(new Adw.Toast({ title: 'Redirect URI copied' }));
-        });
-        redirect.add_suffix(copy);
-        likes.add(redirect);
-        const dashboard = new Adw.ActionRow({ title: 'Spotify app dashboard' });
-        dashboard.add_suffix(new Gtk.LinkButton({ label: 'Open', uri: 'https://developer.spotify.com/dashboard', valign: Gtk.Align.CENTER }));
-        likes.add(dashboard);
-        const account = new Adw.ActionRow({ title: 'Spotify account' });
-        const accountButton = new Gtk.Button({ valign: Gtk.Align.CENTER });
-        account.add_suffix(accountButton);
-        likes.add(account);
         let stopSignIn = null;
-        const refreshAccount = (waiting = false) => {
-            const connected = Boolean(settings.get_string('spotify-refresh-token'));
-            account.subtitle = waiting ? 'Waiting for the browser…' : connected ? 'Connected' : 'Not connected';
-            accountButton.label = waiting ? 'Cancel' : connected ? 'Disconnect' : 'Connect';
-            accountButton.css_classes = connected && !waiting ? ['destructive-action'] : ['suggested-action'];
-            accountButton.sensitive = waiting || connected || Boolean(settings.get_string('spotify-client-id'));
-        };
-        accountButton.connect('clicked', () => {
-            if (stopSignIn) { stopSignIn(); stopSignIn = null; refreshAccount(); return; }
-            if (settings.get_string('spotify-refresh-token')) { settings.set_string('spotify-refresh-token', ''); return; }
-            stopSignIn = connectSpotify(settings, {
-                onDone: () => { stopSignIn = null; refreshAccount(); window.add_toast(new Adw.Toast({ title: 'Spotify connected' })); },
-                onError: e => { stopSignIn = null; refreshAccount(); window.add_toast(new Adw.Toast({ title: e.message })); },
+        if (LIKE_SONGS_ENABLED) {
+            const likes = group(playerPage, 'Like songs');
+            likes.description = 'Shows a heart in the player. Create a Spotify app, add the redirect URI below to it, then paste its client ID.';
+            const spotifyId = new Adw.EntryRow({ title: 'Spotify client ID', text: settings.get_string('spotify-client-id') });
+            spotifyId.connect('changed', () => {
+                const value = spotifyId.text.trim();
+                if (value === settings.get_string('spotify-client-id')) return;
+                settings.set_string('spotify-client-id', value);
+                // A token belongs to the app that issued it.
+                settings.set_string('spotify-refresh-token', '');
             });
-            refreshAccount(Boolean(stopSignIn));
-        });
-        refreshAccount();
-        for (const key of ['spotify-client-id', 'spotify-refresh-token'])
-            signals.push(settings.connect(`changed::${key}`, () => refreshAccount(Boolean(stopSignIn))));
+            likes.add(spotifyId);
+            const redirect = new Adw.ActionRow({ title: 'Redirect URI', subtitle: SPOTIFY_REDIRECT_URI, subtitle_selectable: true });
+            const copy = new Gtk.Button({ icon_name: 'edit-copy-symbolic', valign: Gtk.Align.CENTER,
+                tooltip_text: 'Copy', css_classes: ['flat'] });
+            copy.connect('clicked', () => {
+                copy.get_clipboard().set(SPOTIFY_REDIRECT_URI);
+                window.add_toast(new Adw.Toast({ title: 'Redirect URI copied' }));
+            });
+            redirect.add_suffix(copy);
+            likes.add(redirect);
+            const dashboard = new Adw.ActionRow({ title: 'Spotify app dashboard' });
+            dashboard.add_suffix(new Gtk.LinkButton({ label: 'Open', uri: 'https://developer.spotify.com/dashboard', valign: Gtk.Align.CENTER }));
+            likes.add(dashboard);
+            const account = new Adw.ActionRow({ title: 'Spotify account' });
+            const accountButton = new Gtk.Button({ valign: Gtk.Align.CENTER });
+            account.add_suffix(accountButton);
+            likes.add(account);
+            const refreshAccount = (waiting = false) => {
+                const connected = Boolean(settings.get_string('spotify-refresh-token'));
+                account.subtitle = waiting ? 'Waiting for the browser…' : connected ? 'Connected' : 'Not connected';
+                accountButton.label = waiting ? 'Cancel' : connected ? 'Disconnect' : 'Connect';
+                accountButton.css_classes = connected && !waiting ? ['destructive-action'] : ['suggested-action'];
+                accountButton.sensitive = waiting || connected || Boolean(settings.get_string('spotify-client-id'));
+            };
+            accountButton.connect('clicked', () => {
+                if (stopSignIn) { stopSignIn(); stopSignIn = null; refreshAccount(); return; }
+                if (settings.get_string('spotify-refresh-token')) { settings.set_string('spotify-refresh-token', ''); return; }
+                stopSignIn = connectSpotify(settings, {
+                    onDone: () => { stopSignIn = null; refreshAccount(); window.add_toast(new Adw.Toast({ title: 'Spotify connected' })); },
+                    onError: e => { stopSignIn = null; refreshAccount(); window.add_toast(new Adw.Toast({ title: e.message })); },
+                });
+                refreshAccount(Boolean(stopSignIn));
+            });
+            refreshAccount();
+            for (const key of ['spotify-client-id', 'spotify-refresh-token'])
+                signals.push(settings.connect(`changed::${key}`, () => refreshAccount(Boolean(stopSignIn))));
+        }
 
         const playerDesktop = group(playerPage, 'Desktop player');
         toggle(playerDesktop, 'player-pinned', 'Keep player on desktop');
@@ -242,6 +252,8 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
             signals.push(settings.connect(`changed::${key}`, refreshPanelPreview));
 
         window.connect('close-request', () => {
+            // Moving is a temporary mode of this window, never a saved state.
+            settings.set_boolean('floating-moving', false);
             stopSignIn?.();
             preview.destroy();
             signals.forEach(id => settings.disconnect(id));

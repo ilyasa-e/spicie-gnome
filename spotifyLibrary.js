@@ -10,6 +10,10 @@
 import GLib from 'gi://GLib';
 import Soup from 'gi://Soup?version=3.0';
 
+// Liking is switched off for now: no heart in the player, no settings group.
+// The account code stays so it can be turned back on in one place.
+export const LIKE_SONGS_ENABLED = false;
+
 export const SPOTIFY_REDIRECT_URI = 'http://127.0.0.1:8898/callback';
 export const SPOTIFY_REDIRECT_PORT = 8898;
 export const SPOTIFY_SCOPES = 'user-library-read user-library-modify';
