@@ -24,6 +24,7 @@ import { lyricAttribution, attributionMarkup, requiresVisibleAttribution } from 
 import { lineAlignment } from '../lyricsPresentation.js';
 import { treatsMessageAsLyrics } from '../hudLifecycle.js';
 import { floatingFrame, countdownDots, LyricRowMotion } from '../lyricsView.js';
+import { pangoFont } from '../fontWeight.js';
 
 // Load X11 surface methods when available. Wayland-only GTK builds do not need
 // this namespace; the extension hides their windows through the compositor.
@@ -95,6 +96,7 @@ export class FloatingLyricsHUDApp {
                 this._settings = new Gio.Settings({ settings_schema: schema });
                 const keys = [
                     'font-family',
+                    'font-weight',
                     'font-size',
                     'line-spacing',
                     'background-style',
@@ -166,6 +168,10 @@ export class FloatingLyricsHUDApp {
         // follows the monitor refresh rather than a millisecond timer.
         this._drawingArea.add_tick_callback(() => {
             const frame = this._viewFrame(this._getCurrentPositionMs());
+            // Toggle the overlay label here, before layout. Changing its
+            // visibility from the draw function snapshots it unallocated.
+            const showCredits = this._showsCredits(frame);
+            if (this._creditsLabel && this._creditsLabel.visible !== showCredits) this._creditsLabel.set_visible(showCredits);
             const animate = this._settings?.get_boolean('animate-lyrics') ?? true;
             const timed = frame.rows.some(row => row.state === 'active' && row.line.syllables?.length);
             if (this._frameSignature(frame) !== this._lastFrame ||
@@ -271,7 +277,7 @@ export class FloatingLyricsHUDApp {
                 if (!this._hasStdinLyrics) this._lyricsProvider?.cancel();
                 this._hasStdinLyrics = true;
                 ++this._requestGeneration;
-            } else if (treatsMessageAsLyrics(msg)) {
+            } else if (treatsMessageAsLyrics(msg) && !msg.pending) {
                 this._hasStdinLyrics = false;
             }
 
@@ -282,6 +288,9 @@ export class FloatingLyricsHUDApp {
                     this._contentHeight = null;
                     this._lastDrawPosition = null;
                     this._lines = Array.isArray(msg.lines) ? msg.lines : [];
+                    // The extension is still fetching the next song. Keep the
+                    // window's size so it does not collapse and grow back.
+                    this._pending = Boolean(msg.pending) && !hasLines;
                     this._setAttribution(this._lines.length ? msg.attribution || {provider:'Unknown source',contributors:[]} : null, msg.expiresAt);
                     this._trackTitle = msg.title || '';
                     this._trackArtist = msg.artist || '';
@@ -302,7 +311,7 @@ export class FloatingLyricsHUDApp {
                     break;
             }
             this._drawingArea?.queue_draw();
-            if (treatsMessageAsLyrics(msg) && !hasLines) {
+            if (treatsMessageAsLyrics(msg) && !hasLines && !msg.pending) {
                 // The extension had nothing to show for this track. Recover
                 // independently so the window is not blank for the song.
                 const known = this._mpris?.track;
@@ -423,9 +432,7 @@ export class FloatingLyricsHUDApp {
         const currentPosMs = this._getCurrentPositionMs();
         const frame = this._viewFrame(currentPosMs);
         this._lastFrame = this._frameSignature(frame);
-        const showCredits = Boolean(attributionMarkup(this._attribution) && (requiresVisibleAttribution(this._attribution)
-            ? frame.rows.length : frame.ending));
-        this._creditsLabel?.set_visible(showCredits);
+        const showCredits = this._showsCredits(frame);
 
         // Settings lookup with safe defaults
         const bgStyle = this._settings ? this._settings.get_string('background-style') : 'transparent';
@@ -437,7 +444,7 @@ export class FloatingLyricsHUDApp {
         if (!frame.rows.length && !frame.filler && !showCredits) {
             this._rowMotion = null;
             this._lastDrawPosition = null;
-            this._queueHeight(40);
+            if (!this._pending) this._queueHeight(40);
             return;
         }
 
@@ -506,6 +513,11 @@ export class FloatingLyricsHUDApp {
         // Keep the native window size stable while text scrolls. Resizing it
         // on every animation frame makes some compositors flash a blank frame.
         this._queueHeight(this._contentHeight + 10);
+    }
+
+    _showsCredits(frame) {
+        return Boolean(attributionMarkup(this._attribution) && (requiresVisibleAttribution(this._attribution)
+            ? frame.rows.length : frame.ending));
     }
 
     _drawCountdown(cr, filler, positionMs, width, y, fontSize = 22) {
@@ -581,12 +593,14 @@ export class FloatingLyricsHUDApp {
     _lineLayout(cr, line, fontName, fontSize, width, active) {
         const animate = active && (this._settings?.get_boolean('animate-lyrics') ?? true);
         const alignment = lineAlignment(this._settings?.get_string?.('lyrics-alignment') || 'vocals', line);
-        const key = `${fontName}:${fontSize}:${width}:${animate}:${alignment}`;
+        const weight = this._settings?.get_string?.('font-weight') || 'bold';
+        const key = `${fontName}:${weight}:${fontSize}:${width}:${animate}:${alignment}`;
         this._karaokeLayouts ||= new Map();
         let cache = this._karaokeLayouts.get(line);
         if (cache?.key !== key) {
             cache = { line, key, drawing: new KaraokeLayout(cr,
-                animate ? line : { ...line, syllables: null }, `${fontName} Bold ${fontSize}`, width, alignment) };
+                animate ? line : { ...line, syllables: null }, pangoFont(Pango, fontName, weight, fontSize),
+                width, alignment) };
             this._karaokeLayouts.set(line, cache);
         }
         return cache;

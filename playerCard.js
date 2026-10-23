@@ -2,16 +2,30 @@ import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import Pango from 'gi://Pango';
 import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 import * as Slider from 'resource:///org/gnome/shell/ui/slider.js';
 import { SourceCredits } from './sourceCredits.js';
 import { PlayerLyrics } from './playerLyrics.js';
 import { DEFAULT_PALETTE, formatTime } from './playerTheme.js';
 
+const ICONS = Gio.File.new_for_uri(import.meta.url).get_parent().get_child('icons');
+const heartIcon = filled => new Gio.FileIcon({
+    file: ICONS.get_child(filled ? 'spicie-heart-filled-symbolic.svg' : 'spicie-heart-symbolic.svg')});
+
 export class PlayerCard {
-    constructor(settings, mpris, onOpenPrefs) {
+    /**
+     * @param {object} options
+     * @param {boolean} options.detachLyrics keep the lyric panel out of this.actor;
+     *   the owner places this.lyricsActor itself (the pinned player does)
+     * @param {Function} options.onLinkOpened called after a credit link opens
+     * @param {Function} options.onToggleLike called when the like button is pressed
+     */
+    constructor(settings, mpris, onOpenPrefs, {detachLyrics = false, onLinkOpened = null, onToggleLike = null} = {}) {
         this._settings = settings;
         this._mpris = mpris;
         this._onOpenPrefs = onOpenPrefs;
+        this._detachLyrics = detachLyrics;
+        this._like = {available: false, liked: false, busy: false};
         this._duration = 0;
         this._palette = DEFAULT_PALETTE;
         this._signals = [];
@@ -31,6 +45,11 @@ export class PlayerCard {
         info.add_child(this._artist);
         this.header.add_child(this._cover);
         this.header.add_child(info);
+        this._likeButton = this._button('', 'Like song', () => onToggleLike?.());
+        this._likeButton.child.gicon = heartIcon(false);
+        this._likeButton.add_style_class_name('spotify-player-like');
+        this._likeButton.visible = false;
+        this.header.add_child(this._likeButton);
 
         this._controls = new St.BoxLayout({ style_class: 'spotify-player-controls', x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER });
         this._prev = this._button('media-skip-backward-symbolic', 'Previous song', () => this._call('previous'));
@@ -43,14 +62,18 @@ export class PlayerCard {
         this._slider = new Slider.Slider(0);
         this._slider.add_style_class_name('spotify-player-slider');
         this._slider.accessible_name = 'Song position';
+        this._slider.track_hover = true;
+        this._slider.connect('notify::hover', () => this._applySliderStyle());
         this._slider.connect('drag-begin', () => {
             if (this._seekTimeout) GLib.Source.remove(this._seekTimeout);
             this._seekTimeout = 0;
             this._dragging = true;
             this._seekTrack = this._trackKey;
+            this._applySliderStyle();
         });
         this._slider.connect('drag-end', () => {
             this._dragging = false;
+            this._applySliderStyle();
             if (this._seekTrack === this._trackKey) this._seek();
             else this.updatePosition(this._mpris.getPositionMs());
         });
@@ -72,10 +95,11 @@ export class PlayerCard {
         this._total = new St.Label({ text: '0:00', x_align: Clutter.ActorAlign.END });
         this._times.add_child(this._elapsed);
         this._times.add_child(this._total);
-        this._lyricPanel = new PlayerLyrics(settings, () => this._mpris.getPositionMs());
+        this._lyricPanel = new PlayerLyrics(settings, () => this._mpris.getPositionMs(), onLinkOpened);
         this._lyricBox = this._lyricPanel.actor;
-        this.actor.add_child(this._lyricBox);
-        this._credits = new SourceCredits();
+        if (detachLyrics) this.lyricsActor = this._lyricBox;
+        else this.actor.add_child(this._lyricBox);
+        this._credits = new SourceCredits(onLinkOpened);
         this._credits.actor.add_style_class_name('spotify-player-source-credits');
         this._surface.add_child(this._credits.actor);
         this._footer = new St.BoxLayout({ style_class: 'spotify-player-footer' });
@@ -89,7 +113,8 @@ export class PlayerCard {
         this._footer.add_child(this._pin);
         this._footer.add_child(this._prefs);
         this._surface.add_child(this._footer);
-        for (const key of ['player-layout', 'show-floating', 'player-pinned', 'show-player-lyrics', 'player-scale', 'player-lyric-lines', 'show-countdown', 'animate-lyrics'])
+        for (const key of ['player-layout', 'show-floating', 'player-pinned', 'show-player-lyrics', 'player-scale', 'player-lyric-lines', 'show-countdown', 'animate-lyrics',
+            'player-lyrics-font-weight'])
             this._signals.push(settings.connect(`changed::${key}`, () => {
                 if (key === 'show-countdown') this._lyricPanel.setLines(this._lines || []);
                 this._applySettings();
@@ -147,11 +172,24 @@ export class PlayerCard {
         const p = this._palette;
         this._surface.style += `background-color: ${p.surface}; background-gradient-direction: vertical; background-gradient-start: ${p.top}; background-gradient-end: ${p.surface}; color: ${p.foreground};`;
         this._artist.style += `color: ${p.secondary};`;
-        this._lyricBox.style += `background-color: ${p.surface}; color: ${p.foreground};`;
+        this._lyricPanel.setColors(`background-color: ${p.surface}; color: ${p.foreground};`);
         this._progress.style += `color: ${p.secondary};`;
         this._lyrics.style += `color: ${p.secondary};`;
         this._play.style += `background-color: ${p.accent}; color: ${p.surface};`;
-        this._slider.style += `color: ${p.foreground}; -barlevel-active-background-color: ${p.accent};`;
+        this._likeButton.style += `color: ${this._like.liked ? p.accent : p.secondary};`;
+        this._applySliderStyle();
+    }
+
+    // Hovering or dragging the seek bar thickens it, reveals the handle and
+    // switches to the cover accent, so it reads as something to grab.
+    _applySliderStyle() {
+        const horizontal = this._settings.get_string('player-layout') === 'horizontal';
+        const f = this._settings.get_int('player-scale') / 100;
+        const active = this._slider.hover || this._dragging;
+        const p = this._palette;
+        this._slider.style = `height: ${(horizontal ? 18 : 14) * f}px; ` +
+            `-barlevel-height: ${(active ? 5 : 3) * f}px; -slider-handle-radius: ${(active ? 6 : 0) * f}px; ` +
+            `color: ${p.foreground}; -barlevel-active-background-color: ${active ? p.accent : p.secondary};`;
     }
 
     _applySize() {
@@ -162,21 +200,22 @@ export class PlayerCard {
         this.actor.style = `spacing: ${px(8)};`;
         this._surface.style = `width: ${width}px; padding: ${px(horizontal ? 12 : 10)}; border-radius: ${px(12)};`;
         this.header.style = `spacing: ${px(horizontal ? 10 : 8)};`;
-        this._title.style = `font-size: ${px(13)}; max-width: ${px(horizontal ? 150 : 104)};`;
-        this._artist.style = `font-size: ${px(11)}; max-width: ${px(horizontal ? 150 : 104)}; margin-top: ${px(2)};`;
+        // The like button takes its room from the song details.
+        const infoWidth = (horizontal ? 150 : 104) - (this._likeButton.visible ? (horizontal ? 30 : 26) : 0);
+        this._title.style = `font-size: ${px(13)}; max-width: ${px(infoWidth)};`;
+        this._artist.style = `font-size: ${px(11)}; max-width: ${px(infoWidth)}; margin-top: ${px(2)};`;
         this._cover.icon_size = Math.round((horizontal ? 38 : 32) * f);
         this._cover.style = `border-radius: ${px(horizontal ? 10 : 6)};`;
         this._controls.style = `spacing: ${px(horizontal ? 4 : 8)}; margin-top: ${px(horizontal ? 0 : 8)}; margin-bottom: ${px(horizontal ? 0 : 6)};`;
         this._body.get_first_child().style = horizontal ? `spacing: ${px(12)};` : this.header.style;
-        for (const button of [this._prev, this._play, this._next, this._pin, this._prefs]) {
-            const utility = button === this._pin || button === this._prefs;
+        for (const button of [this._prev, this._play, this._next, this._pin, this._prefs, this._likeButton]) {
+            const utility = button === this._pin || button === this._prefs || button === this._likeButton;
             const size = utility ? (horizontal ? 26 : 24) : button === this._play ? (horizontal ? 30 : 28) : (horizontal ? 28 : 24);
             button.style = `width: ${px(size)}; height: ${px(size)}; border-radius: ${px(utility ? 7 : size / 2)};`;
             button.child.icon_size = Math.round((utility || !horizontal ? 14 : 18) * f);
             button.child.style = `icon-size: ${px(utility || !horizontal ? 14 : 18)};`;
         }
         this._progress.style = `spacing: ${px(2)}; margin-top: ${px(horizontal ? 6 : 0)};`;
-        this._slider.style = `height: ${px(horizontal ? 18 : 14)}; -barlevel-height: ${px(3)}; -slider-handle-radius: ${px(4)};`;
         this._times.style = `font-size: ${px(horizontal ? 11 : 10)};`;
         this._footer.style = `spacing: ${px(horizontal ? 6 : 4)}; margin-top: ${px(4)};`;
         this._lyrics.style = `font-size: ${px(horizontal ? 11 : 10)}; padding: ${px(4)};`;
@@ -204,10 +243,40 @@ export class PlayerCard {
         this._lyricPanel.setAvailableHeight(height - this._surface.get_preferred_height(-1)[1] - 8);
     }
 
+    // Detached lyrics get the room beside the card, not the whole screen.
+    setLyricsAvailableHeight(height) {
+        this._lyricPanel.setAvailableHeight(height);
+    }
+
+    setLikeState(state) {
+        this._like = {...this._like, ...state};
+        const {available, liked, busy} = this._like;
+        this._likeButton.visible = available;
+        this._likeButton.child.gicon = heartIcon(liked);
+        this._likeButton.accessible_name = liked ? 'Remove from Liked Songs' : 'Save to Liked Songs';
+        this._likeButton.reactive = !busy;
+        this._likeButton.opacity = busy ? 150 : 255;
+        if (liked) this._likeButton.add_style_pseudo_class('checked');
+        else this._likeButton.remove_style_pseudo_class('checked');
+        // Palette styles are appended, so they are always rebuilt from the size.
+        this._applySize();
+        this._applyPalette();
+    }
+
+    // Draws attention to the pinned player when the top bar is clicked.
+    pulse() {
+        const surface = this._surface;
+        surface.set_pivot_point(0.5, 0.5);
+        surface.remove_all_transitions();
+        surface.ease({scale_x: 1.04, scale_y: 1.04, duration: 120, mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onComplete: () => surface.ease({scale_x: 1, scale_y: 1, duration: 220,
+                mode: Clutter.AnimationMode.EASE_OUT_BACK})});
+    }
+
     setLyricsAbove(above) {
         if (this._lyricsAbove === above) return;
         this._lyricsAbove = above;
-        this.actor.set_child_at_index(this._lyricBox, above ? 0 : 1);
+        if (!this._detachLyrics) this.actor.set_child_at_index(this._lyricBox, above ? 0 : 1);
     }
 
     setAttribution(attribution) {
@@ -273,5 +342,6 @@ export class PlayerCard {
         this._signals.forEach(id => this._settings.disconnect(id));
         this._lyricPanel.destroy();
         this.actor.destroy();
+        this.lyricsActor = null;
     }
 }

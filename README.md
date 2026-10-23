@@ -22,8 +22,34 @@ Click the music indicator in the top bar to open the player. Choose a layout in 
 - **Horizontal:** playback controls sit beside the song details.
 
 Both layouts include the album cover, previous/play/pause/next controls, a seek slider, and song times. The background colour follows the cover. Missing or failed covers use a neutral background.
+Hovering or dragging the seek slider thickens the bar, shows its handle and
+switches it to the cover's accent colour.
 
 Use the pin button or **Keep player on desktop** to keep the player visible. Drag its cover, title, or empty background to move it. The position is saved separately from desktop lyrics. **Player position → Reset** moves it back to the starting position. Fullscreen apps hide the pinned player.
+
+While the player is pinned, clicking the top bar indicator brings the pinned
+player forward with a short pulse instead of opening a second copy in a menu.
+When a fullscreen app hides the pinned player, the click opens the menu as
+usual. The saved position belongs to the player card itself: its lyric panel
+attaches above or below it, so songs with more, fewer, or no lyrics never move
+the controls.
+
+### Like songs
+
+Spotify's media interface has no library calls, so the heart button uses the
+Spotify Web API with your own Spotify app. In **Settings → Player → Like
+songs**:
+
+1. Open the Spotify app dashboard and create an app with the Web API.
+2. Add the shown redirect URI, `http://127.0.0.1:8898/callback`, to the app.
+3. Paste the app's client ID and click **Connect**, then approve access in the
+   browser.
+
+The heart then appears beside the song details and shows whether the song is in
+your Liked Songs. Spicie asks only for the `user-library-read` and
+`user-library-modify` scopes, uses PKCE (no client secret), and stores the
+refresh token in local GNOME settings. **Disconnect** removes it. Spotify
+requires the app owner to have Premium for apps in development mode.
 
 **Player size** scales the entire player from 70% to 150%, including text,
 controls, spacing, and its lyric panel. It changes the actual layout size, so
@@ -41,7 +67,11 @@ Compact always uses this credit placement.
 Lyrics can appear in the top bar, on the desktop, inside the player, or in multiple locations. The top-bar indicator and pinned player appear only while Spotify is available. Choose Left or Right with **Settings → Player → Top bar → Position**. Left places the indicator after the workspace indicator. The top-bar line stays visible between phrases and is cleared when seeking before the first lyric or switching songs. Horizontal layout can show a separate scrolling lyric panel in the popup and pinned player. Compact always keeps lyrics out of the player.
 
 **Settings → Player → Top bar** has separate Artist, Song title, and Lyric line
-switches. Selected fields use ` | ` between them; empty or hidden fields leave
+switches, plus its own **Font weight**.
+Desktop lyrics (**Desktop lyrics → Text and background**) and the player's lyric
+panel (**Player → Lyrics in the player**) each have a **Font weight** too:
+Light, Regular, Medium, Semibold, Bold, or Heavy. Fonts without that weight
+use the nearest one available. Selected fields use ` | ` between them; empty or hidden fields leave
 no extra separators. Turning all three off keeps the playback button. The player
 shows source details when opened, even with player lyrics off. The top bar
 shows only the selected song fields; source credits stay in the player and
@@ -78,12 +108,18 @@ The countdown is a row in the lyric sequence, before the next vocal. The first
 lyric is already visible below it during an intro. Existing rows scroll smoothly
 when focus advances; seeking rebuilds the view immediately.
 
+When the song changes, the previous song's lyrics are hidden at once. The
+window keeps its size until the new lyrics arrive instead of collapsing and
+growing back.
+
 Floating LRCLIB credits appear with the final lyric and remain at the end. For
 responses from the Spicy Lyrics API, including Apple Music, a small source line
 and any required contributor links remain visible whenever lyrics are shown.
 Community credits show uploader and maker names inline, with underlined links
 from the response. They wrap when space is limited; role labels and the Spicy
 Lyrics name are omitted from the credit display. Source metadata stays intact.
+In the player, linked credits (contributor profiles and LRCLIB) show a hand
+cursor and a highlight on hover; opening one closes the popup.
 
 **Animate lyrics** controls highlighting:
 
@@ -142,6 +178,7 @@ GSETTINGS_BACKEND=memory gjs -m checks/presentation.js
 GSETTINGS_BACKEND=memory gjs -m checks/regressions.js
 GSETTINGS_BACKEND=memory gjs -m checks/syllables.js
 GSETTINGS_BACKEND=memory gjs -m checks/view.js
+GSETTINGS_BACKEND=memory gjs -m checks/like.js
 ```
 
 The player checks cover artwork loading, cancellation when songs change, fallback colours, and time formatting. The player and settings also need a running GNOME session for visual and interaction checks.

@@ -13,6 +13,7 @@ import { lyricAttribution } from './lyricsAttribution.js';
 import { fetchTrackLyrics, LYRICS_SETTINGS } from './lyricsRequest.js';
 import { floatingPosition, isLyricsWindow, hideLyricsWindowFromLists } from './lyricsPresentation.js';
 import { recoveryDelayMs } from './hudLifecycle.js';
+import { SpotifyLibrary } from './spotifyLibrary.js';
 
 const wait = ms => new Promise(resolve => {
     GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.max(1, ms), () => {
@@ -29,6 +30,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._mpris = new SpotifyMPRIS();
         this._lyricsProvider = new LyricsProvider();
         this._sync = new LyricsSync();
+        this._library = new SpotifyLibrary(this._settings);
 
         // 2. Standalone Smooth HUD Process & Window State
         this._hudSubprocess = null;
@@ -56,8 +58,12 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             this._indicator.menu,
             this._settings,
             this._mpris,
-            () => this.openPreferences()
+            () => this.openPreferences(),
+            this._library
         );
+        // With the player pinned, the top bar button focuses it instead of
+        // opening a duplicate player in a menu.
+        this._indicator.setActivateHandler(() => this._popup.focusPinned());
 
 
 
@@ -481,6 +487,7 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._lyricsRequestId = requestId;
         this._setLyricsAttribution(null);
         if (!track || !track.title) {
+            this._lyricsTrackKey = null;
             this._indicator.updateLyric('');
             this._popup.setLyrics([]);
             this._sync.setLyrics([]);
@@ -497,11 +504,20 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
         this._indicator.updatePlayback(isPlaying, track);
         this._popup.updateMetadata(track, isPlaying);
 
-        // Keep the previous lyrics on screen while the next set loads. Clearing
-        // here blanks the floating window (and collapses it to an empty strip)
-        // for the whole fetch, which reads as "the HUD disappeared".
         const title = track.title || '';
         const artist = track.artist || '';
+        // The previous song's lyrics must not run against the new song's
+        // clock. Hide them, but tell the window the next set is on its way so
+        // it keeps its size instead of collapsing to an empty strip. A refetch
+        // of the same song (a changed source setting) keeps them on screen.
+        const trackKey = track.trackId || `${title}\n${artist}`;
+        if (trackKey !== this._lyricsTrackKey) {
+            this._lyricsTrackKey = trackKey;
+            this._sync.setLyrics([]);
+            this._popup.setLyrics([]);
+            this._indicator.updateLyric('');
+            this._sendHUDMessage({ type: 'lyrics', title, artist, lines: [], pending: true });
+        }
 
         try {
             const res = await this._fetchLyrics(track, requestId);
@@ -663,7 +679,11 @@ export default class SpotifyFloatingLyricsExtension extends Extension {
             this._popup = null;
         }
 
+        this._library?.destroy();
+        this._library = null;
+
         if (this._indicator) {
+            this._indicator.setActivateHandler(null);
             this._indicator.destroy();
             this._indicator = null;
         }

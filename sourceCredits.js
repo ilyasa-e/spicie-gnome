@@ -4,6 +4,7 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Pango from 'gi://Pango';
+import Meta from 'gi://Meta';
 import { creditItems } from './lyricsAttribution.js';
 
 // Measure wrapped labels at their allocated width so links keep a real
@@ -40,7 +41,8 @@ const CreditsFlow = GObject.registerClass({GTypeName: 'SpicieCreditsFlow'}, clas
 });
 
 export class SourceCredits {
-    constructor() {
+    constructor(onLinkOpened = null) {
+        this._onLinkOpened = onLinkOpened;
         this.actor = new St.Widget({style_class: 'lyrics-source-credits',
             layout_manager: new CreditsFlow(),
             y_align: Clutter.ActorAlign.CENTER, x_expand: true, visible: false});
@@ -62,9 +64,18 @@ export class SourceCredits {
                 const button = new St.Button({child: label, can_focus: true, y_expand: true,
                     style_class: 'lyrics-source-link',
                     accessible_name: person.role ? `${person.role}: ${person.name}` : person.name});
+                // The shell has no link cursor of its own; show one so the
+                // credit reads as clickable before it is pressed.
+                button.connect('notify::hover', () => global.display.set_cursor(button.hover
+                    ? Meta.Cursor.POINTING_HAND : Meta.Cursor.DEFAULT));
+                button.connect('destroy', () => {
+                    if (button.hover) global.display.set_cursor(Meta.Cursor.DEFAULT);
+                });
                 button.connect('clicked', () => {
                     try { Gio.AppInfo.launch_default_for_uri(person.url, null); }
                     catch (_) { console.warn('Spicie: Could not open the contributor link.'); }
+                    // A popup would otherwise stay open on top of the browser.
+                    this._onLinkOpened?.();
                 });
                 this.actor.add_child(button);
             } else this.actor.add_child(label);

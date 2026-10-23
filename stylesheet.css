@@ -4,7 +4,7 @@
 
 .lyrics-source-credits { font-size: 11px; color: rgba(255, 255, 255, 0.85); spacing: 0; margin-left: 10px; }
 .lyrics-source-link { color: #b4dcff; border-radius: 3px; padding: 0; text-decoration: underline; }
-.lyrics-source-link:hover { text-decoration: underline; }
+.lyrics-source-link:hover { color: #ffffff; background-color: rgba(255, 255, 255, 0.12); }
 .lyrics-source-link:focus { background-color: rgba(255, 255, 255, 0.15); }
 
 /* ==========================================================================

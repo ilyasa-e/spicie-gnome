@@ -4,6 +4,9 @@ import Gtk from 'gi://Gtk';
 import Pango from 'gi://Pango';
 import { createLyricsPreview } from './lyricsPreview.js';
 import { panelText } from './lyricsView.js';
+import { FONT_WEIGHTS } from './fontWeight.js';
+import { SPOTIFY_REDIRECT_URI } from './spotifyLibrary.js';
+import { connectSpotify } from './spotifyAuth.js';
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 export default class SpotifyLyricsPreferences extends ExtensionPreferences {
@@ -131,6 +134,8 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
                 fontButton.font_desc = Pango.FontDescription.from_string(settings.get_string('font-family'));
         }));
         fontRow.add_suffix(fontButton);fontRow.activatable_widget = fontButton;text.add(fontRow);
+        const weights = FONT_WEIGHTS.map(([value, label]) => [value, label]);
+        choice(text, 'font-weight', 'Font weight', weights);
         spin(text, 'font-size', 'Text size', 10, 96);
         spin(text, 'line-spacing', 'Line spacing', 0, 100);
         choice(text, 'background-style', 'Background', [
@@ -153,15 +158,67 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
         const playerLyrics = group(playerPage, 'Lyrics in the player');
         toggle(playerLyrics, 'show-player-lyrics', 'Show lyrics');
         const playerLines = spin(playerLyrics, 'player-lyric-lines', 'Lines', 1, 8);
+        const playerWeight = choice(playerLyrics, 'player-lyrics-font-weight', 'Font weight', weights);
         const refreshPlayerLyrics = () => {
             // The card renders its lyrics list beside the controls, so the rows
             // only apply to that layout.
             playerLyrics.sensitive = settings.get_string('player-layout') === 'horizontal';
             playerLines.sensitive = settings.get_boolean('show-player-lyrics');
+            playerWeight.sensitive = playerLines.sensitive;
         };
         refreshPlayerLyrics();
         for (const key of ['player-layout', 'show-player-lyrics'])
             signals.push(settings.connect(`changed::${key}`, refreshPlayerLyrics));
+
+        // Liking needs the user's own Spotify app: Spotify's media interface
+        // has no library calls, and a shared client ID would be capped.
+        const likes = group(playerPage, 'Like songs');
+        likes.description = 'Shows a heart in the player. Create a Spotify app, add the redirect URI below to it, then paste its client ID.';
+        const spotifyId = new Adw.EntryRow({ title: 'Spotify client ID', text: settings.get_string('spotify-client-id') });
+        spotifyId.connect('changed', () => {
+            const value = spotifyId.text.trim();
+            if (value === settings.get_string('spotify-client-id')) return;
+            settings.set_string('spotify-client-id', value);
+            // A token belongs to the app that issued it.
+            settings.set_string('spotify-refresh-token', '');
+        });
+        likes.add(spotifyId);
+        const redirect = new Adw.ActionRow({ title: 'Redirect URI', subtitle: SPOTIFY_REDIRECT_URI, subtitle_selectable: true });
+        const copy = new Gtk.Button({ icon_name: 'edit-copy-symbolic', valign: Gtk.Align.CENTER,
+            tooltip_text: 'Copy', css_classes: ['flat'] });
+        copy.connect('clicked', () => {
+            copy.get_clipboard().set(SPOTIFY_REDIRECT_URI);
+            window.add_toast(new Adw.Toast({ title: 'Redirect URI copied' }));
+        });
+        redirect.add_suffix(copy);
+        likes.add(redirect);
+        const dashboard = new Adw.ActionRow({ title: 'Spotify app dashboard' });
+        dashboard.add_suffix(new Gtk.LinkButton({ label: 'Open', uri: 'https://developer.spotify.com/dashboard', valign: Gtk.Align.CENTER }));
+        likes.add(dashboard);
+        const account = new Adw.ActionRow({ title: 'Spotify account' });
+        const accountButton = new Gtk.Button({ valign: Gtk.Align.CENTER });
+        account.add_suffix(accountButton);
+        likes.add(account);
+        let stopSignIn = null;
+        const refreshAccount = (waiting = false) => {
+            const connected = Boolean(settings.get_string('spotify-refresh-token'));
+            account.subtitle = waiting ? 'Waiting for the browser…' : connected ? 'Connected' : 'Not connected';
+            accountButton.label = waiting ? 'Cancel' : connected ? 'Disconnect' : 'Connect';
+            accountButton.css_classes = connected && !waiting ? ['destructive-action'] : ['suggested-action'];
+            accountButton.sensitive = waiting || connected || Boolean(settings.get_string('spotify-client-id'));
+        };
+        accountButton.connect('clicked', () => {
+            if (stopSignIn) { stopSignIn(); stopSignIn = null; refreshAccount(); return; }
+            if (settings.get_string('spotify-refresh-token')) { settings.set_string('spotify-refresh-token', ''); return; }
+            stopSignIn = connectSpotify(settings, {
+                onDone: () => { stopSignIn = null; refreshAccount(); window.add_toast(new Adw.Toast({ title: 'Spotify connected' })); },
+                onError: e => { stopSignIn = null; refreshAccount(); window.add_toast(new Adw.Toast({ title: e.message })); },
+            });
+            refreshAccount(Boolean(stopSignIn));
+        });
+        refreshAccount();
+        for (const key of ['spotify-client-id', 'spotify-refresh-token'])
+            signals.push(settings.connect(`changed::${key}`, () => refreshAccount(Boolean(stopSignIn))));
 
         const playerDesktop = group(playerPage, 'Desktop player');
         toggle(playerDesktop, 'player-pinned', 'Keep player on desktop');
@@ -172,6 +229,7 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
         toggle(topBar, 'show-in-panel', 'Lyric line');
         toggle(topBar, 'panel-show-artist', 'Artist');
         toggle(topBar, 'panel-show-title', 'Song title');
+        choice(topBar, 'panel-font-weight', 'Font weight', weights);
         const panelPreview = new Adw.ActionRow({title: 'Preview'});topBar.add(panelPreview);
         const refreshPanelPreview = () => {
             panelPreview.subtitle = panelText({artist: 'Artist', title: 'Song'}, 'Current lyric', {
@@ -184,6 +242,7 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
             signals.push(settings.connect(`changed::${key}`, refreshPanelPreview));
 
         window.connect('close-request', () => {
+            stopSignIn?.();
             preview.destroy();
             signals.forEach(id => settings.disconnect(id));
             signals.length = 0;

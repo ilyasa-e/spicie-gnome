@@ -4,6 +4,7 @@ import Clutter from 'gi://Clutter';
 import Pango from 'gi://Pango';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import { panelText } from './lyricsView.js';
+import { fontWeightValue } from './fontWeight.js';
 
 export const SpotifyIndicator = GObject.registerClass(
 class SpotifyIndicator extends PanelMenu.Button {
@@ -45,7 +46,29 @@ class SpotifyIndicator extends PanelMenu.Button {
         if (this._settings) {
             this._settingsChangedIds = ['show-in-panel', 'panel-show-artist', 'panel-show-title'].map(key =>
                 this._settings.connect(`changed::${key}`, () => this._updateText()));
+            this._settingsChangedIds.push(this._settings.connect('changed::panel-font-weight', () => this._applyWeight()));
         }
+        this._applyWeight();
+    }
+
+    /**
+     * @param {Function|null} handler returns true when it handled the click,
+     *   in which case the menu is not opened
+     */
+    setActivateHandler(handler) {
+        this._activateHandler = handler;
+    }
+
+    vfunc_event(event) {
+        const type = event.type();
+        if ((type === Clutter.EventType.BUTTON_PRESS || type === Clutter.EventType.TOUCH_BEGIN) &&
+            !this.menu.isOpen && this._activateHandler?.())
+            return Clutter.EVENT_STOP;
+        return super.vfunc_event(event);
+    }
+
+    _applyWeight() {
+        this._lyricLabel.style = `font-weight: ${fontWeightValue(this._settings?.get_string('panel-font-weight'), 600)};`;
     }
 
     updateLyric(text) {

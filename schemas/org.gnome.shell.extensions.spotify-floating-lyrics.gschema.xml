@@ -103,6 +103,19 @@
       <description>Font family for rendering synced lyrics in the floating HUD.</description>
     </key>
 
+    <key name="font-weight" type="s">
+      <choices>
+        <choice value="light"/>
+        <choice value="regular"/>
+        <choice value="medium"/>
+        <choice value="semibold"/>
+        <choice value="bold"/>
+        <choice value="heavy"/>
+      </choices>
+      <default>'bold'</default>
+      <summary>Desktop lyrics font weight</summary>
+    </key>
+
     <key name="font-size" type="i">
       <range min="10" max="96"/>
       <default>22</default>
@@ -171,6 +184,44 @@
       <range min="1" max="8"/>
       <default>4</default>
       <summary>Number of visible lines in the horizontal player</summary>
+    </key>
+
+    <key name="player-lyrics-font-weight" type="s">
+      <choices>
+        <choice value="light"/>
+        <choice value="regular"/>
+        <choice value="medium"/>
+        <choice value="semibold"/>
+        <choice value="bold"/>
+        <choice value="heavy"/>
+      </choices>
+      <default>'regular'</default>
+      <summary>Player lyrics font weight</summary>
+    </key>
+
+    <key name="panel-font-weight" type="s">
+      <choices>
+        <choice value="light"/>
+        <choice value="regular"/>
+        <choice value="medium"/>
+        <choice value="semibold"/>
+        <choice value="bold"/>
+        <choice value="heavy"/>
+      </choices>
+      <default>'semibold'</default>
+      <summary>Top bar text font weight</summary>
+    </key>
+
+    <key name="spotify-client-id" type="s">
+      <default>''</default>
+      <summary>Spotify app client ID</summary>
+      <description>Client ID of the user's own Spotify app, used to like songs from the player.</description>
+    </key>
+
+    <key name="spotify-refresh-token" type="s">
+      <default>''</default>
+      <summary>Spotify refresh token</summary>
+      <description>Issued when the Spotify account is connected. Cleared by disconnecting.</description>
     </key>
 
     <key name="player-pinned" type="b">

@@ -4,9 +4,10 @@ import GLib from 'gi://GLib';
 import Pango from 'gi://Pango';
 import { SourceCredits } from './sourceCredits.js';
 import { lyricEntries, floatingFrame, countdownDots } from './lyricsView.js';
+import { fontWeightValue } from './fontWeight.js';
 
 export class PlayerLyrics {
-    constructor(settings, getPosition = null) {
+    constructor(settings, getPosition = null, onLinkOpened = null) {
         this._settings = settings;
         this._getPosition = getPosition;
         this._lines = [];
@@ -42,7 +43,7 @@ export class PlayerLyrics {
         this._scroll.connect('scroll-event', stopFollowing);
         this._scroll.connect('button-press-event', stopFollowing);
         this.actor.add_child(this._scroll);
-        this._credits = new SourceCredits();
+        this._credits = new SourceCredits(onLinkOpened);
         this._credits.actor.add_style_class_name('spotify-player-source-credits');
         this.actor.add_child(this._credits.actor);
         this.actor.connect('notify::mapped', () => {
@@ -72,13 +73,21 @@ export class PlayerLyrics {
         this.updatePosition(this._position || 0, true);
     }
 
+    // The card's cover colours. Kept here because every resize rebuilds the
+    // inline style, and new lyrics resize the panel.
+    setColors(style) {
+        this._colors = style;
+        this.applySize(this._scale || 1, this._width || 320);
+    }
+
     applySize(scale, width) {
         this._scale = scale;this._width = width;
-        this.actor.style = `padding: ${12 * scale}px; border-radius: ${12 * scale}px; width: ${width}px; spacing: ${8 * scale}px;`;
+        this.actor.style = `padding: ${12 * scale}px; border-radius: ${12 * scale}px; width: ${width}px; spacing: ${8 * scale}px; ${this._colors || ''}`;
         this._header.style = `font-size: ${11 * scale}px;`;
         this._follow.style = `padding: ${3 * scale}px; font-size: ${10 * scale}px; border-radius: ${4 * scale}px;`;
         this._followIcon.icon_size = Math.round(12 * scale);
         this._credits.actor.style = `font-size: ${10 * scale}px; margin-top: ${4 * scale}px;`;
+        const weight = fontWeightValue(this._settings.get_string('player-lyrics-font-weight'));
         for (const {entry, actor} of this._rows) {
             if (entry.kind === 'filler') {
                 // St.DrawingArea draws inside its content box, so label padding
@@ -88,7 +97,7 @@ export class PlayerLyrics {
                 actor.height = Math.round(40 * scale);
                 continue;
             }
-            actor.style = `font-size: ${16 * scale}px; padding: ${10 * scale}px 0;`;
+            actor.style = `font-size: ${16 * scale}px; font-weight: ${weight}; padding: ${10 * scale}px 0;`;
         }
         this._scheduleFollow();
     }
