@@ -24,13 +24,17 @@ Click the music indicator in the top bar to open the player. Choose a style in *
   button, next and Settings. Its lyric panel sits beside the player.
 - **Style 2 (horizontal):** a small cover with the song details and the
   playback controls beside them. Its lyric panel sits above or below the player.
+- **Style 3 (minimal):** the simplest and smallest card, with no cover: the song
+  title and artist, one playback row with a large play button (the desktop
+  lyrics toggle and Settings at its ends), and a thin seek bar without times.
+  Its lyric panel sits beside the player.
 
 The background colour follows the cover. Missing or failed covers use a neutral background.
 Click the album cover to bring the Spotify window that is playing to the front,
 on its own workspace and restored if it was minimized. If Spotify is running
 without a window (closed to the tray), it is asked to show itself. There is no
-setting for this. On the pinned player a click opens Spotify and a drag moves
-the player.
+setting for this. Style 3 has no cover, so click its song title instead. On
+the pinned player a click opens Spotify and a drag moves the player.
 Hovering or dragging the seek slider thickens the bar, shows its handle and
 switches it to the cover's accent colour.
 
@@ -48,12 +52,12 @@ controls, spacing, and its lyric panel. It changes the actual layout size, so
 buttons and dragging continue to match their visible positions.
 
 In **Settings → Player → Lyrics in the player**, enable **Show lyrics** and
-choose one to eight **Lines**. Both styles have the panel. Style 2 places it
+choose one to eight **Lines**. All styles have the panel. Style 2 places it
 below a player near the top of the screen and above one near the bottom.
-Style 1 places it beside the player, toward the middle of the screen: to the
+Styles 1 and 3 place it beside the player, toward the middle of the screen: to the
 right of a player on the left half and to the left of one on the right half,
 lined up with the player's top edge in the top half of the screen and with its
-bottom edge in the bottom half. In the top bar menu, Style 1 shows the panel on
+bottom edge in the bottom half. In the top bar menu, Styles 1 and 3 show the panel on
 the side of the screen that has room. Scroll freely and click **Follow song**
 to return to the current line.
 

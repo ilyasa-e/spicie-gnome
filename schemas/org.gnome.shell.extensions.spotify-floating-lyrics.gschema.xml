@@ -175,10 +175,11 @@
       <choices>
         <choice value="vertical"/>
         <choice value="horizontal"/>
+        <choice value="minimal"/>
       </choices>
       <default>'vertical'</default>
       <summary>Player layout</summary>
-      <description>Shown as Style 1 and Style 2. Style 1 (vertical) has a large cover above the song details and controls, with lyrics beside the player; Style 2 (horizontal) places the controls beside the details, with lyrics above or below.</description>
+      <description>Shown as Style 1, Style 2 and Style 3. Style 1 (vertical) has a large cover above the song details and controls, with lyrics beside the player; Style 2 (horizontal) places the controls beside the details, with lyrics above or below; Style 3 (minimal) has no cover, only the song details, a large play button and a seek bar, with lyrics beside the player.</description>
     </key>
 
     <key name="player-scale" type="i">

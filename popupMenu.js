@@ -211,13 +211,13 @@ export class SpotifyLyricsPopup {
         this._positionPinned();
     }
 
-    // Style 1 shows lyrics beside the player, on the side of the screen that
-    // has room: to the right of a menu opened on the left half, otherwise to
-    // the left. Style 2 keeps them below the menu.
+    // Styles 1 and 3 show lyrics beside the player, on the side of the screen
+    // that has room: to the right of a menu opened on the left half, otherwise
+    // to the left. Style 2 keeps them below the menu.
     _placeMenuLyrics() {
         let side = 'below';
         const monitor = Main.layoutManager.primaryMonitor;
-        if (playerLayout(this._settings) === 'vertical' && monitor) {
+        if (playerLayout(this._settings) !== 'horizontal' && monitor) {
             const [x] = this._menu.sourceActor.get_transformed_position();
             side = x + this._menu.sourceActor.width / 2 > monitor.x + monitor.width / 2 ? 'left' : 'right';
         }
@@ -251,11 +251,11 @@ export class SpotifyLyricsPopup {
         const y = Math.max(area.y, Math.min(area.y + area.height - height, this._settings.get_int('player-y')));
         if (actor.x !== x || actor.y !== y) actor.set_position(x, y);
         // Lyrics go where there is more room. Style 2: below a card in the
-        // top half, above one in the bottom half. Style 1: beside the card,
+        // top half, above one in the bottom half. Styles 1 and 3: beside the card,
         // toward the middle of the screen, top edges lined up in the top half
         // and bottom edges in the bottom half.
         const lower = y + height / 2 > area.y + area.height / 2;
-        if (playerLayout(this._settings) === 'vertical') {
+        if (playerLayout(this._settings) !== 'horizontal') {
             const right = x + width / 2 < area.x + area.width / 2;
             this._placeLyrics(right ? 'right' : 'left', lower);
             this._pinned.setLyricsAvailableHeight(lower ? y + height - area.y : area.y + area.height - y);

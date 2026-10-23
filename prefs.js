@@ -159,12 +159,15 @@ export default class SpotifyLyricsPreferences extends ExtensionPreferences {
         const playerPage = page('Player', 'multimedia-player-symbolic');
         const playerAppearance = group(playerPage, 'Layout');
         const layoutRow = choice(playerAppearance, 'player-layout', 'Layout', [
-            ['vertical', 'Style 1'], ['horizontal', 'Style 2'],
+            ['vertical', 'Style 1'], ['horizontal', 'Style 2'], ['minimal', 'Style 3'],
         ]);
+        const layoutDescriptions = {
+            vertical: 'Large cover, lyrics beside the player',
+            horizontal: 'Controls beside the song, lyrics above or below',
+            minimal: 'No cover, just the song and controls, lyrics beside the player',
+        };
         const describeLayout = () => {
-            layoutRow.subtitle = settings.get_string('player-layout') === 'horizontal'
-                ? 'Controls beside the song, lyrics above or below'
-                : 'Large cover, lyrics beside the player';
+            layoutRow.subtitle = layoutDescriptions[settings.get_string('player-layout')] ?? layoutDescriptions.vertical;
         };
         describeLayout();
         signals.push(settings.connect('changed::player-layout', describeLayout));

@@ -14,7 +14,9 @@ const heartIcon = filled => new Gio.FileIcon({
     file: ICONS.get_child(filled ? 'spicie-heart-filled-symbolic.svg' : 'spicie-heart-symbolic.svg')});
 
 // Sizes at 100%. Style 1 (vertical) stacks a large cover over the song
-// details and controls; Style 2 (horizontal) puts the controls beside them.
+// details and controls; Style 2 (horizontal) puts the controls beside them;
+// Style 3 (minimal) has no cover, just the song details over a large play
+// button and a thin seek bar.
 const STYLES = {
     vertical: {width: 184, padding: 16, radius: 16, cover: 152, coverRadius: 10, headerSpacing: 6,
         title: 13, artist: 11, controlSpacing: 4, controlMargin: [2, 0], step: 30, play: 40,
@@ -24,10 +26,17 @@ const STYLES = {
         title: 13, artist: 11, controlSpacing: 4, controlMargin: [0, 0], step: 28, play: 30,
         mainIcon: 18, playIcon: 18, utility: 26, slider: 18, progressMargin: 6, times: 11,
         footerSpacing: 6, lyricsLabel: 11, lyricsWidth: 320},
+    minimal: {width: 184, padding: 16, radius: 16, cover: 0, coverRadius: 0, headerSpacing: 6,
+        title: 13, artist: 11, controlSpacing: 4, controlMargin: [12, 10], step: 30, play: 48,
+        mainIcon: 16, playIcon: 20, utility: 26, slider: 14, progressMargin: 0, times: 10,
+        footerSpacing: 4, lyricsLabel: 11, lyricsWidth: 280},
 };
 const CLICK_SLOP = 6;
 
-export const playerLayout = settings => settings.get_string('player-layout') === 'horizontal' ? 'horizontal' : 'vertical';
+export const playerLayout = settings => {
+    const layout = settings.get_string('player-layout');
+    return layout in STYLES ? layout : 'vertical';
+};
 
 export class PlayerCard {
     /**
@@ -65,12 +74,15 @@ export class PlayerCard {
         this._cover = new St.Bin({ style_class: 'spotify-player-cover', child: this._coverIcon, reactive: true,
             can_focus: true, track_hover: true, accessible_name: 'Show Spotify',
             x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER });
-        this._setupCover();
+        this._setupOpenSpotify(this._cover);
         this._title = new St.Label({ text: 'No song playing', style_class: 'spotify-player-title', x_expand: true });
         this._title.clutter_text.ellipsize = Pango.EllipsizeMode.END;
         this._artist = new St.Label({ text: 'Play a song in Spotify', style_class: 'spotify-player-artist', x_expand: true });
         this._artist.clutter_text.ellipsize = Pango.EllipsizeMode.END;
-        this._info = new St.BoxLayout({ vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER });
+        // Style 3 has no cover, so its song details open Spotify instead.
+        this._info = new St.BoxLayout({ vertical: true, style_class: 'spotify-player-info', x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER, track_hover: true, accessible_name: 'Show Spotify' });
+        this._setupOpenSpotify(this._info);
         this._info.add_child(this._title);
         this._info.add_child(this._artist);
         this._likeButton = this._button('', 'Like song', () => onToggleLike?.());
@@ -163,8 +175,7 @@ export class PlayerCard {
         return button;
     }
 
-    _setupCover() {
-        const cover = this._cover;
+    _setupOpenSpotify(cover) {
         cover.connect('notify::hover', () => {
             global.display.set_cursor(cover.hover ? Meta.Cursor.POINTING_HAND : Meta.Cursor.DEFAULT);
             cover.opacity = cover.hover ? 225 : 255;
@@ -173,14 +184,14 @@ export class PlayerCard {
             if (cover.hover) global.display.set_cursor(Meta.Cursor.DEFAULT);
         });
         // Events keep propagating so the pinned player can still be dragged
-        // by its cover.
+        // by its cover or song details.
         cover.connect('button-press-event', (_actor, event) => {
-            this._coverPress = event.get_button() === 1 ? event.get_coords() : null;
+            this._openPress = event.get_button() === 1 ? event.get_coords() : null;
             return Clutter.EVENT_PROPAGATE;
         });
         cover.connect('button-release-event', (_actor, event) => {
-            const press = this._coverPress;
-            this._coverPress = null;
+            const press = this._openPress;
+            this._openPress = null;
             const [x, y] = event.get_coords();
             if (press && event.get_button() === 1 && Math.hypot(x - press[0], y - press[1]) < CLICK_SLOP)
                 this._openSpotify();
@@ -202,6 +213,7 @@ export class PlayerCard {
     _applySettings() {
         const layout = playerLayout(this._settings);
         const horizontal = layout === 'horizontal';
+        const minimal = layout === 'minimal';
         [this._cover, this._info, this._likeButton, this.header, this._controls, this._progress, this._times,
             this._prev, this._play, this._next, this._lyrics, this._lyricsToggle, this._pin, this._prefs, ...this._spacers]
             .forEach(actor => actor.get_parent()?.remove_child(actor));
@@ -213,6 +225,9 @@ export class PlayerCard {
         this._controls.x_expand = !horizontal;
         this._controls.x_align = horizontal ? Clutter.ActorAlign.CENTER : Clutter.ActorAlign.FILL;
         this._footer.visible = horizontal;
+        this._info.reactive = minimal;
+        this._info.can_focus = minimal;
+        if (!minimal) this._info.opacity = 255;
         if (horizontal) {
             add(this._controls, [this._prev, this._play, this._next]);
             add(this._footer, [this._lyrics, this._pin, this._prefs]);
@@ -223,16 +238,15 @@ export class PlayerCard {
             this._body.add_child(this._topRow);
             this._body.add_child(this._progress);
         } else {
-            // Cover, song details, seek bar, then the controls under them.
+            // Style 1: cover, song details, seek bar, then the controls.
+            // Style 3: song details, the controls, then a seek bar without times.
             add(this._controls, [this._lyricsToggle, this._spacers[0], this._prev, this._play, this._next,
                 this._spacers[1], this._prefs]);
             add(this.header, [this._info, this._likeButton, this._pin]);
-            this._body.add_child(this._cover);
-            this._body.add_child(this.header);
-            this._body.add_child(this._progress);
-            this._body.add_child(this._controls);
+            add(this._body, minimal ? [this.header, this._controls, this._progress]
+                : [this._cover, this.header, this._progress, this._controls]);
         }
-        this._progress.add_child(this._times);
+        if (!minimal) this._progress.add_child(this._times);
         this._updateLyricsVisibility();
         const floating = this._settings.get_boolean('show-floating');
         this._lyrics.accessible_name = floating ? 'Hide desktop lyrics' : 'Show desktop lyrics';
@@ -260,9 +274,9 @@ export class PlayerCard {
         this._lyrics.style += `color: ${p.secondary};`;
         this._play.style += `background-color: ${p.accent}; color: ${p.surface};`;
         this._likeButton.style += `color: ${this._like.liked ? p.accent : p.secondary};`;
-        // The buttons at the ends of the Style 1 playback row stay quieter
-        // than the playback buttons.
-        if (playerLayout(this._settings) === 'vertical')
+        // The buttons at the ends of the Style 1 and 3 playback row stay
+        // quieter than the playback buttons.
+        if (playerLayout(this._settings) !== 'horizontal')
             for (const button of [this._lyricsToggle, this._prefs, this._pin]) button.style += `color: ${p.secondary};`;
         this._applySliderStyle();
     }
@@ -288,11 +302,11 @@ export class PlayerCard {
         const width = style.width * f;
         this.actor.style = `spacing: ${px(8)};`;
         this._surface.style = `width: ${width}px; padding: ${px(style.padding)}; border-radius: ${px(style.radius)};`;
-        this.header.style = `spacing: ${px(style.headerSpacing)};` + (horizontal ? '' : ` margin-top: ${px(10)};`);
+        this.header.style = `spacing: ${px(style.headerSpacing)};` + (layout === 'vertical' ? ` margin-top: ${px(10)};` : '');
         if (this._topRow) this._topRow.style = `spacing: ${px(12)};`;
         // The like button takes its room from the song details.
         const besideTitle = (this._likeButton.visible ? 1 : 0) + (horizontal ? 0 : 1);
-        const infoWidth = (horizontal ? 150 : style.cover) - besideTitle * (style.utility + style.headerSpacing);
+        const infoWidth = (horizontal ? 150 : style.width) - besideTitle * (style.utility + style.headerSpacing);
         this._title.style = `font-size: ${px(style.title)}; max-width: ${px(infoWidth)};` + (horizontal ? '' : ' font-weight: bold;');
         this._artist.style = `font-size: ${px(style.artist)}; max-width: ${px(infoWidth)}; margin-top: ${px(2)};`;
         this._applyCover(style.cover * f, style.coverRadius * f);
