@@ -18,9 +18,10 @@ Settings has three tabs.
 
 Click the music indicator in the top bar to open the player. Choose a style in **Settings → Player → Layout**:
 
-- **Style 1 (vertical):** a large rounded album cover on top, then the song
-  title and artist, the seek slider with song times, and previous/play/next
-  with a large play button. Its lyric panel sits beside the player.
+- **Style 1 (vertical):** a narrow card with a rounded album cover on top, then
+  the song title and artist with the pin button, the seek slider with song
+  times, and one playback row: the desktop lyrics toggle, previous, a large play
+  button, next and Settings. Its lyric panel sits beside the player.
 - **Style 2 (horizontal):** a small cover with the song details and the
   playback controls beside them. Its lyric panel sits above or below the player.
 

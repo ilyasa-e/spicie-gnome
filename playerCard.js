@@ -16,9 +16,9 @@ const heartIcon = filled => new Gio.FileIcon({
 // Sizes at 100%. Style 1 (vertical) stacks a large cover over the song
 // details and controls; Style 2 (horizontal) puts the controls beside them.
 const STYLES = {
-    vertical: {width: 200, padding: 14, radius: 16, cover: 172, coverRadius: 10, headerSpacing: 8,
-        title: 14, artist: 12, controlSpacing: 14, controlMargin: [6, 2], step: 34, play: 46,
-        mainIcon: 18, playIcon: 22, utility: 24, slider: 16, progressMargin: 10, times: 10,
+    vertical: {width: 184, padding: 16, radius: 16, cover: 152, coverRadius: 10, headerSpacing: 6,
+        title: 13, artist: 11, controlSpacing: 4, controlMargin: [2, 0], step: 30, play: 40,
+        mainIcon: 16, playIcon: 18, utility: 26, slider: 14, progressMargin: 4, times: 10,
         footerSpacing: 4, lyricsLabel: 11, lyricsWidth: 280},
     horizontal: {width: 320, padding: 12, radius: 12, cover: 38, coverRadius: 8, headerSpacing: 10,
         title: 13, artist: 11, controlSpacing: 4, controlMargin: [0, 0], step: 28, play: 30,
@@ -138,9 +138,12 @@ export class PlayerCard {
         this._pin.add_style_class_name('spotify-player-utility');
         this._prefs = this._button('emblem-system-symbolic', 'Settings', () => this._onOpenPrefs());
         this._prefs.add_style_class_name('spotify-player-utility');
-        this._footer.add_child(this._lyrics);
-        this._footer.add_child(this._pin);
-        this._footer.add_child(this._prefs);
+        // Style 1 has no footer: the desktop lyrics switch and Settings sit
+        // at the ends of the playback row, and the pin beside the song title.
+        this._lyricsToggle = this._button('audio-input-microphone-symbolic', 'Show desktop lyrics',
+            () => settings.set_boolean('show-floating', !settings.get_boolean('show-floating')));
+        this._lyricsToggle.add_style_class_name('spotify-player-utility');
+        this._spacers = [0, 1].map(() => new St.Widget({ x_expand: true }));
         this._surface.add_child(this._footer);
         for (const key of ['player-layout', 'show-floating', 'player-pinned', 'show-player-lyrics', 'player-scale', 'player-lyric-lines', 'show-countdown', 'animate-lyrics',
             'player-lyrics-font-weight'])
@@ -199,13 +202,20 @@ export class PlayerCard {
     _applySettings() {
         const layout = playerLayout(this._settings);
         const horizontal = layout === 'horizontal';
-        [this._cover, this._info, this._likeButton, this.header, this._controls, this._progress, this._times]
+        [this._cover, this._info, this._likeButton, this.header, this._controls, this._progress, this._times,
+            this._prev, this._play, this._next, this._lyrics, this._lyricsToggle, this._pin, this._prefs, ...this._spacers]
             .forEach(actor => actor.get_parent()?.remove_child(actor));
         this._body.destroy_all_children();
         this._topRow = null;
         this.actor.set_style_class_name(`spotify-player-stack ${layout}`);
         this._surface.set_style_class_name(`spotify-player-card ${layout}`);
+        const add = (parent, actors) => actors.forEach(actor => parent.add_child(actor));
+        this._controls.x_expand = !horizontal;
+        this._controls.x_align = horizontal ? Clutter.ActorAlign.CENTER : Clutter.ActorAlign.FILL;
+        this._footer.visible = horizontal;
         if (horizontal) {
+            add(this._controls, [this._prev, this._play, this._next]);
+            add(this._footer, [this._lyrics, this._pin, this._prefs]);
             [this._cover, this._info, this._likeButton].forEach(actor => this.header.add_child(actor));
             this._topRow = new St.BoxLayout({ style_class: 'spotify-player-top-row' });
             this._topRow.add_child(this.header);
@@ -214,7 +224,9 @@ export class PlayerCard {
             this._body.add_child(this._progress);
         } else {
             // Cover, song details, seek bar, then the controls under them.
-            [this._info, this._likeButton].forEach(actor => this.header.add_child(actor));
+            add(this._controls, [this._lyricsToggle, this._spacers[0], this._prev, this._play, this._next,
+                this._spacers[1], this._prefs]);
+            add(this.header, [this._info, this._likeButton, this._pin]);
             this._body.add_child(this._cover);
             this._body.add_child(this.header);
             this._body.add_child(this._progress);
@@ -226,8 +238,11 @@ export class PlayerCard {
         this._lyrics.accessible_name = floating ? 'Hide desktop lyrics' : 'Show desktop lyrics';
         this._lyrics.set_label(floating ? 'Desktop lyrics on' : 'Desktop lyrics');
         this._lyrics.set_style_class_name(`spotify-player-lyrics${floating ? ' enabled' : ''}`);
-        if (floating) this._lyrics.add_style_pseudo_class('checked');
-        else this._lyrics.remove_style_pseudo_class('checked');
+        this._lyricsToggle.accessible_name = this._lyrics.accessible_name;
+        for (const button of [this._lyrics, this._lyricsToggle]) {
+            if (floating) button.add_style_pseudo_class('checked');
+            else button.remove_style_pseudo_class('checked');
+        }
         const pinned = this._settings.get_boolean('player-pinned');
         this._pin.accessible_name = pinned ? 'Unpin player' : 'Keep player on desktop';
         if (pinned) this._pin.add_style_pseudo_class('checked');
@@ -245,6 +260,10 @@ export class PlayerCard {
         this._lyrics.style += `color: ${p.secondary};`;
         this._play.style += `background-color: ${p.accent}; color: ${p.surface};`;
         this._likeButton.style += `color: ${this._like.liked ? p.accent : p.secondary};`;
+        // The buttons at the ends of the Style 1 playback row stay quieter
+        // than the playback buttons.
+        if (playerLayout(this._settings) === 'vertical')
+            for (const button of [this._lyricsToggle, this._prefs, this._pin]) button.style += `color: ${p.secondary};`;
         this._applySliderStyle();
     }
 
@@ -269,20 +288,21 @@ export class PlayerCard {
         const width = style.width * f;
         this.actor.style = `spacing: ${px(8)};`;
         this._surface.style = `width: ${width}px; padding: ${px(style.padding)}; border-radius: ${px(style.radius)};`;
-        this.header.style = `spacing: ${px(style.headerSpacing)};` + (horizontal ? '' : ` margin-top: ${px(12)};`);
+        this.header.style = `spacing: ${px(style.headerSpacing)};` + (horizontal ? '' : ` margin-top: ${px(10)};`);
         if (this._topRow) this._topRow.style = `spacing: ${px(12)};`;
         // The like button takes its room from the song details.
-        const infoWidth = (horizontal ? 150 : style.cover) - (this._likeButton.visible ? style.utility + style.headerSpacing : 0);
+        const besideTitle = (this._likeButton.visible ? 1 : 0) + (horizontal ? 0 : 1);
+        const infoWidth = (horizontal ? 150 : style.cover) - besideTitle * (style.utility + style.headerSpacing);
         this._title.style = `font-size: ${px(style.title)}; max-width: ${px(infoWidth)};` + (horizontal ? '' : ' font-weight: bold;');
         this._artist.style = `font-size: ${px(style.artist)}; max-width: ${px(infoWidth)}; margin-top: ${px(2)};`;
         this._applyCover(style.cover * f, style.coverRadius * f);
         const [above, below] = style.controlMargin;
         this._controls.style = `spacing: ${px(style.controlSpacing)}; margin-top: ${px(above)}; margin-bottom: ${px(below)};`;
-        for (const button of [this._prev, this._play, this._next, this._pin, this._prefs, this._likeButton]) {
-            const utility = button === this._pin || button === this._prefs || button === this._likeButton;
+        for (const button of [this._prev, this._play, this._next, this._pin, this._prefs, this._likeButton, this._lyricsToggle]) {
+            const utility = ![this._prev, this._play, this._next].includes(button);
             const size = utility ? style.utility : button === this._play ? style.play : style.step;
             const icon = utility ? 14 : button === this._play ? style.playIcon : style.mainIcon;
-            button.style = `width: ${px(size)}; height: ${px(size)}; border-radius: ${px(utility ? 7 : size / 2)};`;
+            button.style = `width: ${px(size)}; height: ${px(size)}; border-radius: ${px(utility && horizontal ? 7 : size / 2)};`;
             button.child.icon_size = Math.round(icon * f);
             button.child.style = `icon-size: ${px(icon)};`;
         }
@@ -290,7 +310,7 @@ export class PlayerCard {
         this._times.style = `font-size: ${px(style.times)};`;
         this._footer.style = `spacing: ${px(style.footerSpacing)}; margin-top: ${px(horizontal ? 4 : 6)};`;
         this._lyrics.style = `font-size: ${px(style.lyricsLabel)}; padding: ${px(4)};`;
-        this._credits.actor.style = `font-size: ${px(10)}; margin-top: ${px(horizontal ? 6 : 8)};`;
+        this._credits.actor.style = `font-size: ${px(10)}; margin-top: ${px(6)};`;
         this._lyricPanel.applySize(f, style.lyricsWidth * f);
     }
 
