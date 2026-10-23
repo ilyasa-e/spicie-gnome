@@ -56,5 +56,16 @@ check('Loading lyrics keep the extension in charge instead of a second fetch',pe
 pendingApp._handleIPCMessage(JSON.stringify({type:'lyrics',title:'New',lines:[]}));
 check('A definitive empty answer still starts the window fallback',!pendingApp._hasStdinLyrics&&fallback===1&&!pendingApp._pending);
 pendingApp._shutdown();
+const clockApp=new FloatingLyricsHUDApp();clockApp._mpris={getPositionMs:()=>42000};
+clockApp._handleIPCMessage(JSON.stringify({type:'lyrics',title:'Song',lines}));
+check('Lyrics without a clock follow Spotify instead of freezing at the start',clockApp._getCurrentPositionMs()===42000);
+clockApp._handleIPCMessage(JSON.stringify({type:'sync',status:'Paused',positionMs:9000}));
+check('The extension clock takes over once it arrives',clockApp._getCurrentPositionMs()===9000);
+const prefsValues={'floating-click-passthrough':true,'floating-moving':false};
+clockApp._settings={get_boolean:key=>prefsValues[key]};
+check('Click-through is honoured normally',clockApp._passthrough());
+prefsValues['floating-moving']=true;
+check('Moving accepts the pointer without changing click-through',!clockApp._passthrough()&&prefsValues['floating-click-passthrough']);
+clockApp._mpris=null;clockApp._shutdown();
 app._shutdown();cr.$dispose();Gio.File.new_for_path(path).delete(null);Gio.File.new_for_path(dir).delete(null);
 print(`${count} regression checks passed`);

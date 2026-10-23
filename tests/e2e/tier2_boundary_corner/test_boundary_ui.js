@@ -49,7 +49,8 @@ export function runBoundaryUiTests() {
             const settings = new MockSettings();
             let region = 'untouched';
             const surface = { set_input_region: value => { region = value; } };
-            const fakeWindow = { _settings: settings, _win: { get_surface: () => surface } };
+            const fakeWindow = Object.assign(Object.create(FloatingLyricsHUDApp.prototype),
+                { _settings: settings, _win: { get_surface: () => surface } });
 
             // GDK rejects a null region from JavaScript, so full input is an
             // explicit rectangle and pass-through is an empty region.

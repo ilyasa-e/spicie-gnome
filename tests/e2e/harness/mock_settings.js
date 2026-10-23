@@ -8,6 +8,7 @@ export const SCHEMA_DEFAULTS = {
     'show-floating': true,
     'floating-always-on-top': true,
     'floating-click-passthrough': false,
+    'floating-moving': false,
     'floating-position': 'top-right',
     'floating-x': 100,
     'floating-y': 100,

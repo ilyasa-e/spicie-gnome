@@ -102,6 +102,7 @@ export class FloatingLyricsHUDApp {
                     'background-style',
                     'enable-romanization',
                     'floating-click-passthrough',
+                    'floating-moving',
                     'animate-lyrics',
                     'lyrics-alignment',
                     'floating-line-count',
@@ -184,8 +185,7 @@ export class FloatingLyricsHUDApp {
         // Drag to move window
         const clickGesture = new Gtk.GestureClick({ button: 1 });
         clickGesture.connect('pressed', (gesture, nPress, x, y) => {
-            const passthrough = this._settings ? this._settings.get_boolean('floating-click-passthrough') : false;
-            if (passthrough) return;
+            if (this._passthrough()) return;
 
             if (gesture.get_current_button() === 1) { // Left click
                 const surface = this._win.get_surface();
@@ -220,7 +220,7 @@ export class FloatingLyricsHUDApp {
         this._karaokeCache = null;
         this._karaokeLayouts = new Map();
         this._applyClickPassthrough();
-        this._drawingArea?.set_cursor_from_name(this._settings?.get_boolean('floating-click-passthrough') ? 'default' : 'move');
+        this._drawingArea?.set_cursor_from_name(this._passthrough() ? 'default' : 'move');
         if (this._drawingArea) {
             this._drawingArea.queue_draw();
         }
@@ -231,8 +231,17 @@ export class FloatingLyricsHUDApp {
         const surface = this._win.get_surface();
         if (!surface || typeof surface.set_input_region !== 'function') return;
 
-        const passthrough = this._settings ? this._settings.get_boolean('floating-click-passthrough') : false;
-        surface.set_input_region(inputRegion(passthrough));
+        surface.set_input_region(inputRegion(this._passthrough()));
+    }
+
+    // Moving overrides click-through without changing the saved preference,
+    // so pressing Done restores exactly what the user had.
+    _moving() {
+        return this._settings?.get_boolean('floating-moving') ?? false;
+    }
+
+    _passthrough() {
+        return (this._settings?.get_boolean('floating-click-passthrough') ?? false) && !this._moving();
     }
 
     _startStdinReader() {
@@ -300,6 +309,7 @@ export class FloatingLyricsHUDApp {
                     break;
 
                 case 'sync':
+                    this._syncSeen = true;
                     this._playbackStatus = msg.status || 'Stopped';
                     this._basePositionMs = typeof msg.positionMs === 'number' ? msg.positionMs : 0;
                     this._baseTimeUs = Number.isFinite(msg.sampleTimeUs) ? msg.sampleTimeUs : GLib.get_monotonic_time();
@@ -400,7 +410,9 @@ export class FloatingLyricsHUDApp {
     }
 
     _getCurrentPositionMs() {
-        if (!this._hasStdinLyrics && this._mpris) return this._mpris.getPositionMs();
+        // Lyrics from the extension without a clock yet must not sit frozen at
+        // the start of the song; follow Spotify directly until a sync arrives.
+        if ((!this._hasStdinLyrics || !this._syncSeen) && this._mpris) return this._mpris.getPositionMs();
         if (this._playbackStatus !== 'Playing') {
             return this._basePositionMs;
         }
@@ -445,6 +457,8 @@ export class FloatingLyricsHUDApp {
             this._rowMotion = null;
             this._lastDrawPosition = null;
             if (!this._pending) this._queueHeight(40);
+            // Between songs there is nothing to grab; give the outline a label.
+            if (this._moving()) this._drawMoveOutline(cr, width, height, 'Drag to move the lyrics');
             return;
         }
 
@@ -513,6 +527,23 @@ export class FloatingLyricsHUDApp {
         // Keep the native window size stable while text scrolls. Resizing it
         // on every animation frame makes some compositors flash a blank frame.
         this._queueHeight(this._contentHeight + 10);
+        if (this._moving()) this._drawMoveOutline(cr, width, height);
+    }
+
+    // Shows what can be dragged while Settings -> Move is active.
+    _drawMoveOutline(cr, width, height, hint = null) {
+        cr.save();
+        cr.newPath();
+        this._roundedRect(cr, 1.5, 1.5, width - 3, height - 3, 6);
+        cr.setSourceRGBA(0.21, 0.52, 0.89, 0.18);
+        cr.fillPreserve();
+        cr.setSourceRGBA(0.47, 0.71, 1, 0.95);
+        cr.setLineWidth(2);
+        cr.setDash([6, 4], 0);
+        cr.stroke();
+        cr.restore();
+        if (hint) this._drawTextLine(cr, hint, 'Sans 11', 16, Math.max(4, (height - 18) / 2), [1, 1, 1, 0.9],
+            Math.max(80, width - 32), 'center');
     }
 
     _showsCredits(frame) {
