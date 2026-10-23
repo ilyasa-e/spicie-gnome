@@ -20,6 +20,8 @@ const StickToCard = GObject.registerClass(class SpicieStickToCard extends Clutte
     }
 
     vfunc_update_allocation(_actor, box) {
+        // Before its first layout the card has no box to stick to.
+        if (!this._card.has_allocation()) return;
         const card = this._card.get_allocation_box();
         const [width, height] = [box.get_width(), box.get_height()];
         box.init_rect(card.x1, this.above ? card.y1 - LYRICS_GAP - height : card.y2 + LYRICS_GAP, width, height);
