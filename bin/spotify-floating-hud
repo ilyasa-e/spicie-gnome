@@ -32,6 +32,16 @@ try {
     void imports.gi.GdkX11;
 } catch (_) {}
 
+// GdkSurface.set_input_region() does not accept null from JavaScript. Passing
+// it threw inside 'activate', before stdin and the fallback clock were wired,
+// so the window stayed blank. An oversized rectangle restores full input; the
+// compositor clips it to the surface.
+export function inputRegion(passthrough) {
+    const region = new Cairo.Region();
+    if (!passthrough) region.unionRectangle({x: 0, y: 0, width: 0x7fff, height: 0x7fff});
+    return region;
+}
+
 export class FloatingLyricsHUDApp {
     constructor() {
         this._app = new Gtk.Application({
@@ -216,12 +226,7 @@ export class FloatingLyricsHUDApp {
         if (!surface || typeof surface.set_input_region !== 'function') return;
 
         const passthrough = this._settings ? this._settings.get_boolean('floating-click-passthrough') : false;
-        if (passthrough) {
-            const emptyRegion = new Cairo.Region();
-            surface.set_input_region(emptyRegion);
-        } else {
-            surface.set_input_region(null);
-        }
+        surface.set_input_region(inputRegion(passthrough));
     }
 
     _startStdinReader() {

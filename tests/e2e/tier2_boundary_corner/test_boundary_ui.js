@@ -51,16 +51,18 @@ export function runBoundaryUiTests() {
             const surface = { set_input_region: value => { region = value; } };
             const fakeWindow = { _settings: settings, _win: { get_surface: () => surface } };
 
+            // GDK rejects a null region from JavaScript, so full input is an
+            // explicit rectangle and pass-through is an empty region.
             FloatingLyricsHUDApp.prototype._applyClickPassthrough.call(fakeWindow);
-            expect(region).toBe(null);
+            expect(region !== null && region.numRectangles() === 1).toBe(true);
 
             settings.set_boolean('floating-click-passthrough', true);
             FloatingLyricsHUDApp.prototype._applyClickPassthrough.call(fakeWindow);
-            expect(region !== null).toBe(true);
+            expect(region !== null && region.numRectangles() === 0).toBe(true);
 
             settings.set_boolean('floating-click-passthrough', false);
             FloatingLyricsHUDApp.prototype._applyClickPassthrough.call(fakeWindow);
-            expect(region).toBe(null);
+            expect(region.numRectangles() === 1).toBe(true);
         });
 
         it('T2.25: Zero-height or empty lyrics view handles active line without throwing', async () => {
